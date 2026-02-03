@@ -1,0 +1,63 @@
+# Build directories
+build/
+obj/
+out/
+bin/
+
+# Compiled object files and binaries
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+*.pdb
+*.ilk
+
+# CMake files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+cmake-build-*/
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.suo
+*.user
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+
+# VS Code / other editors
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-workspace
+*.sublime-project
+
+# macOS / Windows thumbnail files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary / swap / logs
+*~
+*.swp
+*.tmp
+*.log
+
+# Archives and package files
+*.zip
+*.tar.gz
+*.7z
+
+# Misc
+*.stackdump
+
+# If you previously committed build files, remove them from the index:
+#   git rm -r --cached build/ obj/ CMakeFiles/ CMakeCache.txt
+# then commit the .gitignore
