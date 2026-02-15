@@ -17,10 +17,10 @@ EXECUTABLE = ChessGame
 
 all: $(EXECUTABLE)
 
-$(OBJ_DIR) $(BIN_DIR):
+$(OBJ_DIR):
 	mkdir -p $@
 
-$(EXECUTABLE): $(OBJECTS) | $(BIN_DIR)
+$(EXECUTABLE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "Build complete: $(EXECUTABLE)"
 
@@ -31,7 +31,7 @@ run: $(EXECUTABLE)
 	./$(EXECUTABLE)
 
 clean:
-	rm -rf build/
+	rm -rf build/ $(EXECUTABLE)
 	@echo "Clean complete"
 
 rebuild: clean all

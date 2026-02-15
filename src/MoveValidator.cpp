@@ -3,13 +3,30 @@
 #include <cmath>
 #include <cstdint>
 
-using Bitboard = uint64_t;
-
 MoveValidator::MoveValidator(BitboardEngine* engine) 
-    : engine(engine), lastEnPassantRow(-1), lastEnPassantCol(-1) {
+    : engine(engine), lastEnPassantRow(-1), lastEnPassantCol(-1),
+      whiteKingsideCastle(true), whiteQueensideCastle(true),
+      blackKingsideCastle(true), blackQueensideCastle(true) {
 }
 
-MoveValidator::~MoveValidator() {
+MoveValidator::~MoveValidator() = default;
+
+Bitboard* MoveValidator::getBitboardForPiece(int piece) {
+    switch (piece) {
+        case BitboardEngine::WHITE_PAWN:   return &engine->pawns[0];
+        case BitboardEngine::BLACK_PAWN:   return &engine->pawns[1];
+        case BitboardEngine::WHITE_ROOK:   return &engine->rooks[0];
+        case BitboardEngine::BLACK_ROOK:   return &engine->rooks[1];
+        case BitboardEngine::WHITE_KNIGHT: return &engine->knights[0];
+        case BitboardEngine::BLACK_KNIGHT: return &engine->knights[1];
+        case BitboardEngine::WHITE_BISHOP: return &engine->bishops[0];
+        case BitboardEngine::BLACK_BISHOP: return &engine->bishops[1];
+        case BitboardEngine::WHITE_QUEEN:  return &engine->queens[0];
+        case BitboardEngine::BLACK_QUEEN:  return &engine->queens[1];
+        case BitboardEngine::WHITE_KING:   return &engine->kings[0];
+        case BitboardEngine::BLACK_KING:   return &engine->kings[1];
+        default: return nullptr;
+    }
 }
 
 bool MoveValidator::isValidMove(int fromRow, int fromCol, int toRow, int toCol, int playerColor) {
@@ -62,85 +79,62 @@ bool MoveValidator::isValidMove(int fromRow, int fromCol, int toRow, int toCol, 
             if (!isPathClear(fromRow, fromCol, toRow, toCol)) return false;
             break;
         case 5:  // King
-            if (!isKingMove(fromRow, fromCol, toRow, toCol)) return false;
+            if (!isKingMove(fromRow, fromCol, toRow, toCol) &&
+                !isCastlingMove(fromRow, fromCol, toRow, toCol, playerColor)) return false;
             break;
         default:
             return false;
     }
     
-    // CRITICAL: Check if move would leave king in check
-    // We must simulate the move and check if the king would be in check
-    
+    // Simulate the move and check if the king would be in check
     int fromIndex = fromRow * 8 + fromCol;
     int toIndex = toRow * 8 + toCol;
     
-    // Get pointers to source and target bitboards
-    Bitboard* sourceBitboard = nullptr;
-    Bitboard* targetBitboard = nullptr;
+    // Castling is already fully validated by isCastlingMove - skip generic simulation
+    if (basePiece == 5 && std::abs(toCol - fromCol) == 2) {
+        return true;  // isCastlingMove already checked all squares for attacks
+    }
     
-    // Map piece IDs to bitboard pointers
-    if (piece == 0) sourceBitboard = &engine->pawns[0];
-    else if (piece == 1) sourceBitboard = &engine->pawns[1];
-    else if (piece == 2) sourceBitboard = &engine->rooks[0];
-    else if (piece == 3) sourceBitboard = &engine->rooks[1];
-    else if (piece == 4) sourceBitboard = &engine->knights[0];
-    else if (piece == 5) sourceBitboard = &engine->knights[1];
-    else if (piece == 6) sourceBitboard = &engine->bishops[0];
-    else if (piece == 7) sourceBitboard = &engine->bishops[1];
-    else if (piece == 8) sourceBitboard = &engine->queens[0];
-    else if (piece == 9) sourceBitboard = &engine->queens[1];
-    else if (piece == 10) sourceBitboard = &engine->kings[0];
-    else if (piece == 11) sourceBitboard = &engine->kings[1];
-    
+    Bitboard* sourceBitboard = getBitboardForPiece(piece);
     if (!sourceBitboard) return false;
     
-    // Get target bitboard if capturing
-    if (targetPiece != -1) {
-        if (targetPiece == 0) targetBitboard = &engine->pawns[0];
-        else if (targetPiece == 1) targetBitboard = &engine->pawns[1];
-        else if (targetPiece == 2) targetBitboard = &engine->rooks[0];
-        else if (targetPiece == 3) targetBitboard = &engine->rooks[1];
-        else if (targetPiece == 4) targetBitboard = &engine->knights[0];
-        else if (targetPiece == 5) targetBitboard = &engine->knights[1];
-        else if (targetPiece == 6) targetBitboard = &engine->bishops[0];
-        else if (targetPiece == 7) targetBitboard = &engine->bishops[1];
-        else if (targetPiece == 8) targetBitboard = &engine->queens[0];
-        else if (targetPiece == 9) targetBitboard = &engine->queens[1];
-        else if (targetPiece == 10) targetBitboard = &engine->kings[0];
-        else if (targetPiece == 11) targetBitboard = &engine->kings[1];
+    Bitboard* targetBitboard = (targetPiece != -1) ? getBitboardForPiece(targetPiece) : nullptr;
+    
+    // Handle en passant capture in simulation (pawn diagonal to empty square)
+    Bitboard* enPassantBitboard = nullptr;
+    int enPassantIndex = -1;
+    if (piece / 2 == 0 && std::abs(toCol - fromCol) == 1 && targetPiece == -1) {
+        int capturedPawn = (playerColor == WHITE) ? BitboardEngine::BLACK_PAWN : BitboardEngine::WHITE_PAWN;
+        enPassantBitboard = getBitboardForPiece(capturedPawn);
+        enPassantIndex = fromRow * 8 + toCol;
     }
     
     // Save old state
     Bitboard oldSourceBB = *sourceBitboard;
-    Bitboard oldTargetBB = 0;
-    bool hadTarget = (targetBitboard != nullptr);
-    if (hadTarget) {
-        oldTargetBB = *targetBitboard;
-    }
+    Bitboard oldTargetBB = targetBitboard ? *targetBitboard : 0;
+    Bitboard oldEnPassantBB = enPassantBitboard ? *enPassantBitboard : 0;
+    Bitboard oldAllWhite = engine->allWhitePieces;
+    Bitboard oldAllBlack = engine->allBlackPieces;
+    Bitboard oldAllPieces = engine->allPieces;
     
     // Simulate the move
-    *sourceBitboard &= ~(1ULL << fromIndex);  // Remove from source
-    *sourceBitboard |= (1ULL << toIndex);     // Add to destination
+    *sourceBitboard &= ~(1ULL << fromIndex);
+    *sourceBitboard |= (1ULL << toIndex);
+    if (targetBitboard) *targetBitboard &= ~(1ULL << toIndex);
+    if (enPassantBitboard) *enPassantBitboard &= ~(1ULL << enPassantIndex);
+    engine->updateCombinedBitboards();
     
-    if (targetBitboard) {
-        *targetBitboard &= ~(1ULL << toIndex);  // Remove captured piece
-    }
-    
-    // Check if king is in check after this move
     bool kingInCheck = isKingInCheck(playerColor);
     
-    // Restore the old state
+    // Restore old state
     *sourceBitboard = oldSourceBB;
-    if (hadTarget) {
-        *targetBitboard = oldTargetBB;
-    }
+    if (targetBitboard) *targetBitboard = oldTargetBB;
+    if (enPassantBitboard) *enPassantBitboard = oldEnPassantBB;
+    engine->allWhitePieces = oldAllWhite;
+    engine->allBlackPieces = oldAllBlack;
+    engine->allPieces = oldAllPieces;
     
-    // If king would be in check, move is illegal
-    if (kingInCheck) {
-        return false;
-    }
-    
-    return true;
+    return !kingInCheck;
 }
 
 bool MoveValidator::isPawnMove(int piece, int fromRow, int fromCol, int toRow, int toCol, int playerColor) {
@@ -255,13 +249,7 @@ bool MoveValidator::isSquareAttacked(int row, int col, int byColor) {
             // Check if this piece can move to the target square
             // WITHOUT checking if it would leave the king in check (to avoid infinite recursion)
             
-            // Check bounds
-            if (r < 0 || r > 7 || c < 0 || c > 7 ||
-                row < 0 || row > 7 || col < 0 || col > 7) {
-                continue;
-            }
-            
-            // Can't move to the same square
+            // Can't attack from the same square
             if (r == row && c == col) continue;
             
             int targetPiece = getPieceAt(row, col);
@@ -328,58 +316,85 @@ bool MoveValidator::isSquareAttacked(int row, int col, int byColor) {
 }
 
 bool MoveValidator::isKingInCheck(int playerColor) {
-    // Find king position
-    int kingPiece = (playerColor == WHITE) ? 10 : 11;
-    int kingRow = -1, kingCol = -1;
+    // Use bitboard to find king position directly
+    int colorIdx = (playerColor == WHITE) ? 0 : 1;
+    Bitboard kingBB = engine->kings[colorIdx];
+    if (kingBB == 0) return false;  // King not found (shouldn't happen)
     
-    for (int r = 0; r < 8; r++) {
-        for (int c = 0; c < 8; c++) {
-            if (getPieceAt(r, c) == kingPiece) {
-                kingRow = r;
-                kingCol = c;
-                break;
-            }
-        }
-        if (kingRow != -1) break;
-    }
-    
-    if (kingRow == -1) return false;  // King not found (shouldn't happen)
+    // Find the set bit index
+    int index = __builtin_ctzll(kingBB);
+    int kingRow, kingCol;
+    BitboardEngine::indexToSquare(index, kingRow, kingCol);
     
     int enemyColor = (playerColor == WHITE) ? BLACK : WHITE;
     return isSquareAttacked(kingRow, kingCol, enemyColor);
 }
 
-bool MoveValidator::executeMove(const Move& move, int playerColor) {
+bool MoveValidator::executeMove(Move& move, int playerColor) {
     if (!isValidMove(move.fromRow, move.fromCol, move.toRow, move.toCol, playerColor)) {
         return false;
     }
     
     int piece = getPieceAt(move.fromRow, move.fromCol);
     int targetPiece = getPieceAt(move.toRow, move.toCol);
+    move.capturedPiece = targetPiece;
+    
+    // Check for castling
+    if (piece / 2 == 5 && std::abs(move.toCol - move.fromCol) == 2) {
+        move.isCastling = true;
+        engine->movePiece(move.fromRow, move.fromCol, move.toRow, move.toCol);
+        
+        // Move the rook
+        if (move.toCol == 6) {  // Kingside
+            engine->movePiece(move.fromRow, 7, move.fromRow, 5);
+        } else {  // Queenside (toCol == 2)
+            engine->movePiece(move.fromRow, 0, move.fromRow, 3);
+        }
+        
+        updateCastlingRights(piece, move.fromRow, move.fromCol);
+        clearEnPassantSquare();
+        
+        int enemyColor = (playerColor == WHITE) ? BLACK : WHITE;
+        if (isKingInCheck(enemyColor)) {
+            std::cout << "Check!" << std::endl;
+        }
+        return true;
+    }
     
     // Check for en passant
-    bool isEnPassant = false;
-    if ((piece == 0 || piece == 1) && std::abs(move.toCol - move.fromCol) == 1 && targetPiece == -1) {
-        isEnPassant = true;
-        // Remove the captured pawn
+    if (piece / 2 == 0 && std::abs(move.toCol - move.fromCol) == 1 && targetPiece == -1) {
+        move.isEnPassant = true;
         int capturedRow = move.fromRow;
         engine->clearSquare(capturedRow, move.toCol);
-        targetPiece = (piece == 0) ? 1 : 0;  // Opposite color pawn
-        std::cout << BitboardEngine::getPieceChar(targetPiece) << BitboardEngine::squareToAlgebraic(capturedRow, move.toCol) 
-                  << " captured en passant" << std::endl;
+        move.capturedPiece = (piece == BitboardEngine::WHITE_PAWN) ? BitboardEngine::BLACK_PAWN : BitboardEngine::WHITE_PAWN;
     }
     
-    // Execute the move
+    // Execute the move on bitboard
     engine->movePiece(move.fromRow, move.fromCol, move.toRow, move.toCol);
     
-    // Handle pawn promotion
-    if ((piece == 0 || piece == 1) && ((playerColor == WHITE && move.toRow == 0) || (playerColor == BLACK && move.toRow == 7))) {
-        std::cout << "Pawn promoted at " << BitboardEngine::squareToAlgebraic(move.toRow, move.toCol) << std::endl;
+    // Update castling rights based on what moved/was captured
+    updateCastlingRights(piece, move.fromRow, move.fromCol);
+    if (targetPiece != -1) {
+        updateCastlingRights(targetPiece, move.toRow, move.toCol);
     }
     
-    // Check for double pawn push (for en passant next move)
-    if ((piece == 0 || piece == 1) && std::abs(move.toRow - move.fromRow) == 2) {
-        setLastEnPassantSquare(move.toRow, move.toCol);
+    // Handle pawn promotion — use caller's choice if set, otherwise default to queen
+    if (piece / 2 == 0 && ((playerColor == WHITE && move.toRow == 0) || (playerColor == BLACK && move.toRow == 7))) {
+        move.isPawnPromotion = true;
+        int promotedPiece;
+        if (move.promotedTo != -1) {
+            promotedPiece = move.promotedTo;  // Caller specified promotion choice
+        } else {
+            promotedPiece = (playerColor == WHITE) ? BitboardEngine::WHITE_QUEEN : BitboardEngine::BLACK_QUEEN;
+        }
+        engine->clearSquare(move.toRow, move.toCol);
+        engine->setPieceAt(move.toRow, move.toCol, promotedPiece);
+        move.promotedTo = promotedPiece;
+    }
+    
+    // Track en passant square (store the passed-through square, not the landing square)
+    if (piece / 2 == 0 && std::abs(move.toRow - move.fromRow) == 2) {
+        setLastEnPassantSquare((move.fromRow + move.toRow) / 2, move.toCol);
     } else {
         clearEnPassantSquare();
     }
@@ -415,31 +430,107 @@ std::vector<Move> MoveValidator::getValidMoves(int row, int col, int playerColor
     return moves;
 }
 
-bool MoveValidator::isCheckmate(int playerColor) {
-    // Checkmate requires: 1) King is in check, 2) No legal moves available
-    
-    if (!isKingInCheck(playerColor)) {
-        return false;  // Not in check, so can't be checkmate
-    }
-    
-    // Try all possible moves for the player - if any move is legal, it's not checkmate
+bool MoveValidator::hasAnyLegalMoves(int playerColor) {
     for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; c++) {
             int piece = getPieceAt(r, c);
-            
-            // Skip empty squares and opponent pieces
             if (piece == -1) continue;
             int pieceColor = (piece % 2 == 0) ? WHITE : BLACK;
             if (pieceColor != playerColor) continue;
             
-            // Get valid moves for this piece
             std::vector<Move> moves = getValidMoves(r, c, playerColor);
             if (!moves.empty()) {
-                return false;  // Found a legal move, not checkmate
+                return true;
             }
         }
     }
+    return false;
+}
+
+bool MoveValidator::isCheckmate(int playerColor) {
+    return isKingInCheck(playerColor) && !hasAnyLegalMoves(playerColor);
+}
+
+bool MoveValidator::isStalemate(int playerColor) {
+    return !isKingInCheck(playerColor) && !hasAnyLegalMoves(playerColor);
+}
+
+bool MoveValidator::isCastlingMove(int fromRow, int fromCol, int toRow, int toCol, int playerColor) {
+    // King must move exactly 2 squares horizontally, same row
+    if (fromRow != toRow) return false;
+    if (std::abs(toCol - fromCol) != 2) return false;
     
-    // No legal moves and in check = checkmate
+    int backRank = (playerColor == WHITE) ? 7 : 0;
+    if (fromRow != backRank) return false;
+    if (fromCol != 4) return false;  // King must be on e-file
+    
+    bool kingside = (toCol == 6);
+    bool queenside = (toCol == 2);
+    if (!kingside && !queenside) return false;
+    
+    // Check castling rights
+    if (playerColor == WHITE) {
+        if (kingside && !whiteKingsideCastle) return false;
+        if (queenside && !whiteQueensideCastle) return false;
+    } else {
+        if (kingside && !blackKingsideCastle) return false;
+        if (queenside && !blackQueensideCastle) return false;
+    }
+    
+    // Check that rook is in place
+    int rookCol = kingside ? 7 : 0;
+    int expectedRook = (playerColor == WHITE) ? BitboardEngine::WHITE_ROOK : BitboardEngine::BLACK_ROOK;
+    if (getPieceAt(backRank, rookCol) != expectedRook) return false;
+    
+    // Path between king and rook must be clear
+    int minCol = std::min(fromCol, rookCol) + 1;
+    int maxCol = std::max(fromCol, rookCol);
+    for (int c = minCol; c < maxCol; c++) {
+        if (getPieceAt(backRank, c) != -1) return false;
+    }
+    
+    // King must not be in check, and must not pass through or land on attacked squares
+    int enemyColor = (playerColor == WHITE) ? BLACK : WHITE;
+    if (isSquareAttacked(backRank, 4, enemyColor)) return false;  // Can't castle out of check
+    
+    int step = kingside ? 1 : -1;
+    for (int c = fromCol + step; c != toCol + step; c += step) {
+        if (isSquareAttacked(backRank, c, enemyColor)) return false;
+    }
+    
     return true;
+}
+
+void MoveValidator::updateCastlingRights(int piece, int fromRow, int fromCol) {
+    // If king moves, lose both castling rights
+    if (piece == BitboardEngine::WHITE_KING) {
+        whiteKingsideCastle = false;
+        whiteQueensideCastle = false;
+    } else if (piece == BitboardEngine::BLACK_KING) {
+        blackKingsideCastle = false;
+        blackQueensideCastle = false;
+    }
+    // If rook moves or is captured, lose that side's castling right
+    else if (piece == BitboardEngine::WHITE_ROOK) {
+        if (fromRow == 7 && fromCol == 7) whiteKingsideCastle = false;
+        if (fromRow == 7 && fromCol == 0) whiteQueensideCastle = false;
+    } else if (piece == BitboardEngine::BLACK_ROOK) {
+        if (fromRow == 0 && fromCol == 7) blackKingsideCastle = false;
+        if (fromRow == 0 && fromCol == 0) blackQueensideCastle = false;
+    }
+}
+
+void MoveValidator::resetCastlingRights() {
+    whiteKingsideCastle = true;
+    whiteQueensideCastle = true;
+    blackKingsideCastle = true;
+    blackQueensideCastle = true;
+}
+
+bool MoveValidator::canCastleKingside(int playerColor) const {
+    return (playerColor == WHITE) ? whiteKingsideCastle : blackKingsideCastle;
+}
+
+bool MoveValidator::canCastleQueenside(int playerColor) const {
+    return (playerColor == WHITE) ? whiteQueensideCastle : blackQueensideCastle;
 }

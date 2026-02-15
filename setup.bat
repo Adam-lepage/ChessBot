@@ -9,7 +9,7 @@ if %ERRORLEVEL% EQU 0 (
     echo SFML installation complete!
     echo.
     echo Building Chess Game in WSL...
-    wsl -d Ubuntu -- bash -ic "cd /mnt/c/CodingProjects/ChessGame && make clean && make"
+    wsl -d Ubuntu -- bash -c "cd \"$(wslpath '%~dp0')\" && make clean && make"
 ) else (
     echo.
     echo Installation failed. Please install SFML manually.

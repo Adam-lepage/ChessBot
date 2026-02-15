@@ -54,8 +54,10 @@ public:
     // Print current board state to console
     void printBoard() const;
     
-private:
-    // Piece type constants
+    // Update combined bitboards after manual bitboard changes
+    void updateCombinedBitboards();
+    
+    // Piece type constants (public for use by bots and validators)
     static const int WHITE_PAWN = 0;
     static const int BLACK_PAWN = 1;
     static const int WHITE_ROOK = 2;

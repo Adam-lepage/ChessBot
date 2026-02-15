@@ -2,12 +2,16 @@
 #include <iostream>
 #include <iomanip>
 
+extern bool g_debugOutput;
+
+/* This bitboard is a 64-bit representation of the chessboard, where each bit corresponds to a square. 
+   This means each piece type for each color is represented by a separate 64-bit integer, allowing for efficient bitwise operations. */
+
 BitboardEngine::BitboardEngine() {
     initializeStartingPosition();
 }
 
-BitboardEngine::~BitboardEngine() {
-}
+BitboardEngine::~BitboardEngine() = default;
 
 void BitboardEngine::initializeStartingPosition() {
     // Clear all bitboards
@@ -20,10 +24,10 @@ void BitboardEngine::initializeStartingPosition() {
         kings[i] = 0;
     }
     
-    // White pieces (rows 6 and 7, indices 48-63)
-    // White pawns on row 6
+    // Set white and black pawns on their respective rows
     for (int col = 0; col < 8; col++) {
         pawns[0] |= (1ULL << squareToIndex(6, col));
+        pawns[1] |= (1ULL << squareToIndex(1, col));
     }
     
     // White back rank (row 7)
@@ -33,12 +37,6 @@ void BitboardEngine::initializeStartingPosition() {
     queens[0] |= (1ULL << squareToIndex(7, 3));
     kings[0] |= (1ULL << squareToIndex(7, 4));
     
-    // Black pieces (rows 0 and 1, indices 0-15)
-    // Black pawns on row 1
-    for (int col = 0; col < 8; col++) {
-        pawns[1] |= (1ULL << squareToIndex(1, col));
-    }
-    
     // Black back rank (row 0)
     rooks[1] |= (1ULL << squareToIndex(0, 0)) | (1ULL << squareToIndex(0, 7));
     knights[1] |= (1ULL << squareToIndex(0, 1)) | (1ULL << squareToIndex(0, 6));
@@ -46,28 +44,31 @@ void BitboardEngine::initializeStartingPosition() {
     queens[1] |= (1ULL << squareToIndex(0, 3));
     kings[1] |= (1ULL << squareToIndex(0, 4));
     
-    // Update combined bitboards
+    // Update combined bitboards (these are useful for clear path checks and move generation)
     allWhitePieces = pawns[0] | rooks[0] | knights[0] | bishops[0] | queens[0] | kings[0];
     allBlackPieces = pawns[1] | rooks[1] | knights[1] | bishops[1] | queens[1] | kings[1];
     allPieces = allWhitePieces | allBlackPieces;
 }
 
+// Convert (row, col) to a bitboard index (0-63)
 int BitboardEngine::squareToIndex(int row, int col) {
     return row * 8 + col;
 }
 
+// Convert a bitboard index back to (row, col)
 void BitboardEngine::indexToSquare(int index, int& row, int& col) {
     row = index / 8;
     col = index % 8;
 }
 
+// Convert (row, col) to algebraic notation (e.g., "a1", "h8")
 std::string BitboardEngine::squareToAlgebraic(int row, int col) {
-    // Convert to chess notation: a-h (columns) and 1-8 (rows, inverted)
     char file = 'a' + col;
     char rank = '8' - row;  // Row 0 is rank 8, row 7 is rank 1
     return std::string(1, file) + rank;
 }
 
+// Maps piece constants to characters for logging and display purposes
 char BitboardEngine::getPieceChar(int piece) {
     switch (piece) {
         case WHITE_PAWN:
@@ -93,6 +94,7 @@ char BitboardEngine::getPieceChar(int piece) {
     }
 }
 
+// Get the piece type at a specific square by masking the corresponding bit in each piece's bitboard
 int BitboardEngine::getPieceAt(int row, int col) const {
     int index = squareToIndex(row, col);
     uint64_t mask = 1ULL << index;
@@ -113,6 +115,7 @@ int BitboardEngine::getPieceAt(int row, int col) const {
     return EMPTY;
 }
 
+// Set a piece at a specific square by updating the corresponding bit in the appropriate piece's bitboard
 void BitboardEngine::setPieceAt(int row, int col, int piece) {
     int index = squareToIndex(row, col);
     uint64_t mask = 1ULL << index;
@@ -166,6 +169,7 @@ void BitboardEngine::setPieceAt(int row, int col, int piece) {
     allPieces = allWhitePieces | allBlackPieces;
 }
 
+// Clear a square by resetting the corresponding bit in all piece bitboards
 void BitboardEngine::clearSquare(int row, int col) {
     int index = squareToIndex(row, col);
     uint64_t mask = ~(1ULL << index);
@@ -189,21 +193,53 @@ void BitboardEngine::clearSquare(int row, int col) {
     allPieces = allWhitePieces | allBlackPieces;
 }
 
+// Move a piece from one square to another by clearing the source and setting the destination
 void BitboardEngine::movePiece(int fromRow, int fromCol, int toRow, int toCol) {
     int piece = getPieceAt(fromRow, fromCol);
     
     if (piece != EMPTY) {
-        clearSquare(fromRow, fromCol);
-        clearSquare(toRow, toCol);  // Capture if there's a piece
-        setPieceAt(toRow, toCol, piece);
+        // Clear source and destination without updating combined BBs each time
+        int fromIndex = squareToIndex(fromRow, fromCol);
+        int toIndex = squareToIndex(toRow, toCol);
+        uint64_t fromMask = ~(1ULL << fromIndex);
+        uint64_t toMask = ~(1ULL << toIndex);
         
-        // Log the move
-        std::string fromSquare = squareToAlgebraic(fromRow, fromCol);
-        std::string toSquare = squareToAlgebraic(toRow, toCol);
-        std::cout << getPieceChar(piece) << fromSquare << "-" << toSquare << std::endl;
+        // Clear both squares from all bitboards
+        for (int i = 0; i < 2; i++) {
+            pawns[i] &= fromMask & toMask;
+            rooks[i] &= fromMask & toMask;
+            knights[i] &= fromMask & toMask;
+            bishops[i] &= fromMask & toMask;
+            queens[i] &= fromMask & toMask;
+            kings[i] &= fromMask & toMask;
+        }
+        
+        // Place piece at destination
+        Bitboard* bb = nullptr;
+        int colorIdx = (piece % 2 == 0) ? 0 : 1;
+        switch (piece / 2) {
+            case 0: bb = &pawns[colorIdx]; break;
+            case 1: bb = &rooks[colorIdx]; break;
+            case 2: bb = &knights[colorIdx]; break;
+            case 3: bb = &bishops[colorIdx]; break;
+            case 4: bb = &queens[colorIdx]; break;
+            case 5: bb = &kings[colorIdx]; break;
+        }
+        if (bb) *bb |= (1ULL << toIndex);
+        
+        // Single combined bitboard update
+        updateCombinedBitboards();
+        
+        // Debug output
+        if (g_debugOutput) {
+            std::string fromSquare = squareToAlgebraic(fromRow, fromCol);
+            std::string toSquare = squareToAlgebraic(toRow, toCol);
+            std::cout << "[DEBUG] " << getPieceChar(piece) << fromSquare << "-" << toSquare << std::endl;
+        }
     }
 }
 
+// Print the current board state to the console in a human-readable format
 void BitboardEngine::printBoard() const {
     std::cout << "\n  a b c d e f g h\n";
     
@@ -234,4 +270,10 @@ void BitboardEngine::printBoard() const {
     }
     
     std::cout << "  a b c d e f g h\n\n";
+}
+
+void BitboardEngine::updateCombinedBitboards() {
+    allWhitePieces = pawns[0] | rooks[0] | knights[0] | bishops[0] | queens[0] | kings[0];
+    allBlackPieces = pawns[1] | rooks[1] | knights[1] | bishops[1] | queens[1] | kings[1];
+    allPieces = allWhitePieces | allBlackPieces;
 }
