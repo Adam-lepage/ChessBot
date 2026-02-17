@@ -2,6 +2,13 @@
 
 A C++ chess game visualization using SFML, designed to be extended with game logic and an AI chess bot.
 
+### Make sure you have SFML
+
+```bash
+sudo apt-get update
+sudo apt-get install libsfml-dev
+```
+
 ### Building with Make
 
 ```bash
@@ -26,4 +33,5 @@ Options:
                              white / black
   --no-gui                 Disable GUI (auto-enabled for bvb)
   --gui                    Force GUI on (even for bvb)
+
 
