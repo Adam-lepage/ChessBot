@@ -1,6 +1,7 @@
 #include "Game.h"
 #include "GameConfig.h"
 #include "RandomBot.h"
+#include "Botv1.h"
 
 int main(int argc, char* argv[]) {
     // Parse command-line arguments
@@ -12,8 +13,8 @@ int main(int argc, char* argv[]) {
     Game game(config);
 
     // Hardcoded bots
-    RandomBot randomBot1;
-    RandomBot randomBot2;
+    Botv1 botv1;
+    RandomBot randomBot;
 
     switch (config.mode) {
         case GameMode::PVP:
@@ -21,18 +22,18 @@ int main(int argc, char* argv[]) {
             break;
 
         case GameMode::PVB:
-            // Player vs Bot: assign bot to the non-player color
+            // Player vs Bot: assign Botv1 to the non-player color
             if (config.playerColor == 0) {
-                game.setBlackBot(&randomBot1);
+                game.setBlackBot(&botv1);
             } else {
-                game.setWhiteBot(&randomBot1);
+                game.setWhiteBot(&botv1);
             }
             break;
 
         case GameMode::BVB:
-            // Bot vs Bot: both are RandomBot
-            game.setWhiteBot(&randomBot1);
-            game.setBlackBot(&randomBot2);
+            // Bot vs Bot: Botv1 (white) vs RandomBot (black)
+            game.setWhiteBot(&botv1);
+            game.setBlackBot(&randomBot);
             break;
     }
 

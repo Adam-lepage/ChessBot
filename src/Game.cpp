@@ -194,9 +194,12 @@ void Game::updateBoardView() {
     boardView.setViewport(viewport);
 }
 
-// If it is a bot's turn, process the move for that bot
+// If it is a bot's turn, render the current board state first so the
+// player's move is visually placed, then process the bot's move.
 void Game::update() {
     if (!isGameOver && isBotTurn()) {
+        // Render one frame so the player's last move is visible before the bot blocks
+        render();
         processBotMove();
     }
 }

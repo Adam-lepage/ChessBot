@@ -61,6 +61,31 @@ public:
     bool canCastleKingside(int playerColor) const;
     bool canCastleQueenside(int playerColor) const;
 
+    // State save/restore for bot search
+    struct ValidatorState {
+        int enPassantRow, enPassantCol;
+        bool whiteKingsideCastle, whiteQueensideCastle;
+        bool blackKingsideCastle, blackQueensideCastle;
+    };
+
+    ValidatorState getState() const {
+        return {lastEnPassantRow, lastEnPassantCol,
+                whiteKingsideCastle, whiteQueensideCastle,
+                blackKingsideCastle, blackQueensideCastle};
+    }
+
+    void setState(const ValidatorState& s) {
+        lastEnPassantRow = s.enPassantRow;
+        lastEnPassantCol = s.enPassantCol;
+        whiteKingsideCastle = s.whiteKingsideCastle;
+        whiteQueensideCastle = s.whiteQueensideCastle;
+        blackKingsideCastle = s.blackKingsideCastle;
+        blackQueensideCastle = s.blackQueensideCastle;
+    }
+
+    // Non-const access to engine (for bot search make/unmake)
+    BitboardEngine* getEngine() { return engine; }
+
 private:
     BitboardEngine* engine;
     int lastEnPassantRow, lastEnPassantCol;
