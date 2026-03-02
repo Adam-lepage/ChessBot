@@ -8,7 +8,7 @@
 #include <climits>
 #include <algorithm>
 
-class Botv1 : public ChessBot {
+class Botv2 : public ChessBot {
 public:
     static constexpr int MAX_DEPTH = 7;
 
@@ -81,7 +81,7 @@ public:
         // Print all depth stats
         std::cout.rdbuf(coutBuf);
 
-        std::cout << "\n=== Botv1 Search ===" << std::endl;
+        std::cout << "\n=== Botv2 Search ===" << std::endl;
         for (int i = 0; i < (int)stats.size(); i++) {
             std::cout << "  Depth " << (i + 1)
                       << ": " << stats[i].positions << " positions"
@@ -97,17 +97,16 @@ public:
         return bestMove;
     }
 
-    std::string getName() const override { return "Botv1"; }
+    std::string getName() const override { return "Botv2"; }
 
 private:
     int maxDepth = MAX_DEPTH;
     int positionsEvaluated = 0;
 
     int alphaBeta(MoveValidator& validator, BitboardEngine& eng, int depth, int currentColor, int alpha, int beta) {
-        // Leaf node return static evaluation of the position
+        // At horizon, drop into quiescence search to resolve captures
         if (depth == 0) {
-            positionsEvaluated++;
-            return evaluate(eng);
+            return quiescence(validator, eng, currentColor, alpha, beta);
         }
 
         // Generate all legal moves for the side to move and order them
@@ -166,6 +165,65 @@ private:
                 if (alpha >= beta) break;  // Alpha cutoff
             }
             return minEval;
+        }
+    }
+
+    // Quiescence search: only examine captures (and promotions) to avoid horizon effect
+    int quiescence(MoveValidator& validator, BitboardEngine& eng, int currentColor, int alpha, int beta) {
+        positionsEvaluated++;
+        int standPat = evaluate(eng);
+
+        // Standing pat: if the static eval already causes a cutoff, return it
+        if (currentColor == 0) {
+            if (standPat >= beta) return beta;
+            if (standPat > alpha) alpha = standPat;
+        } else {
+            if (standPat <= alpha) return alpha;
+            if (standPat < beta) beta = standPat;
+        }
+
+        // Generate only capture moves
+        std::vector<Move> captures = generateCaptureMoves(eng, validator, currentColor);
+        if (captures.empty()) return standPat;
+
+        // Order captures by MVV-LVA
+        Move noMove(0,0,0,0);
+        orderMoves(captures, eng, noMove);
+
+        if (currentColor == 0) {
+            for (auto& move : captures) {
+                EngineState engState = saveEngineState(eng);
+                MoveValidator::ValidatorState valState = validator.getState();
+
+                Move m = move;
+                validator.executeMove(m, currentColor);
+
+                int eval = quiescence(validator, eng, 1, alpha, beta);
+
+                restoreEngineState(eng, engState);
+                validator.setState(valState);
+
+                if (eval > alpha) alpha = eval;
+                if (alpha >= beta) return beta; // Beta cutoff
+            }
+            return alpha;
+        } else {
+            for (auto& move : captures) {
+                EngineState engState = saveEngineState(eng);
+                MoveValidator::ValidatorState valState = validator.getState();
+
+                Move m = move;
+                validator.executeMove(m, currentColor);
+
+                int eval = quiescence(validator, eng, 0, alpha, beta);
+
+                restoreEngineState(eng, engState);
+                validator.setState(valState);
+
+                if (eval < beta) beta = eval;
+                if (alpha >= beta) return alpha; // Alpha cutoff
+            }
+            return beta;
         }
     }
 
@@ -269,6 +327,49 @@ private:
             }
         }
         return allMoves;
+    }
+
+    // Generate only capture (and promotion) moves for quiescence search
+    std::vector<Move> generateCaptureMoves(const BitboardEngine& eng, MoveValidator& validator, int color) {
+        std::vector<Move> captureMoves;
+        int promoRank = (color == 0) ? 0 : 7;
+
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                int piece = eng.getPieceAt(row, col);
+                if (piece == -1) continue;
+                int pieceColor = (piece % 2 == 0) ? 0 : 1;
+                if (pieceColor != color) continue;
+
+                bool isPawn = (piece / 2 == 0);
+                auto moves = validator.getValidMoves(row, col, color);
+
+                for (auto& m : moves) {
+                    bool isCapture = (eng.getPieceAt(m.toRow, m.toCol) != -1);
+                    bool isPromotion = (isPawn && m.toRow == promoRank);
+
+                    if (!isCapture && !isPromotion) continue;
+
+                    if (isPromotion) {
+                        // Expand into 4 promotion choices
+                        int pieces[4] = {
+                            (color == 0) ? BitboardEngine::WHITE_QUEEN  : BitboardEngine::BLACK_QUEEN,
+                            (color == 0) ? BitboardEngine::WHITE_ROOK   : BitboardEngine::BLACK_ROOK,
+                            (color == 0) ? BitboardEngine::WHITE_BISHOP : BitboardEngine::BLACK_BISHOP,
+                            (color == 0) ? BitboardEngine::WHITE_KNIGHT : BitboardEngine::BLACK_KNIGHT
+                        };
+                        for (int p : pieces) {
+                            Move pm = m;
+                            pm.promotedTo = p;
+                            captureMoves.push_back(pm);
+                        }
+                    } else {
+                        captureMoves.push_back(m);
+                    }
+                }
+            }
+        }
+        return captureMoves;
     }
 
     // holds all bitboards

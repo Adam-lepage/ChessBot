@@ -1,6 +1,7 @@
 #include "Game.h"
 #include "BitboardEngine.h"
 #include <iostream>
+#include <iomanip>
 
 bool g_debugOutput = false;
 
@@ -20,6 +21,7 @@ Game::Game(const GameConfig& cfg)
       isStalemate(false),
     isDrawByMoveLimit(false),
     isDrawByMaterial(false),
+    isDrawByRepetition(false),
       isGameOver(false),
     isDragging(false),
     waitingForPromotion(false),
@@ -28,6 +30,7 @@ Game::Game(const GameConfig& cfg)
       whiteBot(nullptr),
       blackBot(nullptr),
     halfmoveClock(0),
+    turnTimerRunning(false),
     headless(!cfg.gui),
       config(cfg) {
     g_debugOutput = cfg.debug;
@@ -47,6 +50,7 @@ void Game::init() {
     }
     
     std::cout << "White to move" << std::endl;
+    startTurnTimer();
     if (g_debugOutput) {
         std::cout << "[DEBUG] Debug output enabled" << std::endl;
         std::cout << "[DEBUG] Mode: ";
@@ -246,6 +250,8 @@ void Game::render() {
             message = "Draw by insufficient material!";
         } else if (isDrawByMoveLimit) {
             message = "Draw by 75-move rule!";
+        } else if (isDrawByRepetition) {
+            message = "Draw by threefold repetition!";
         }
         
         // Create a semi-transparent overlay
@@ -458,6 +464,9 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
     Move move(selectedRow, selectedCol, targetRow, targetCol);
     
     if (moveValidator.executeMove(move, currentPlayer)) {
+        // Record turn time before switching players
+        stopTurnTimer();
+
         std::cout << BitboardEngine::squareToAlgebraic(selectedRow, selectedCol) << " -> " 
                   << BitboardEngine::squareToAlgebraic(targetRow, targetCol);
         if (move.isCastling) std::cout << " (castle)";
@@ -479,7 +488,12 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
         // Check for check/checkmate and draw conditions
         checkForCheckmate();
         if (!isGameOver) {
-            checkForDrawConditions();
+            checkForDrawConditions(move);
+        }
+        if (isGameOver) {
+            printTurnTimeStats();
+        } else {
+            startTurnTimer();
         }
         
         // Print board state in debug mode
@@ -509,6 +523,9 @@ void Game::completePromotion(int promotedPiece) {
     pendingPromotionMove.promotedTo = promotedPiece;
     
     if (moveValidator.executeMove(pendingPromotionMove, currentPlayer)) {
+        // Record turn time before switching players
+        stopTurnTimer();
+
         std::cout << BitboardEngine::squareToAlgebraic(pendingPromotionMove.fromRow, pendingPromotionMove.fromCol) << " -> "
                   << BitboardEngine::squareToAlgebraic(pendingPromotionMove.toRow, pendingPromotionMove.toCol)
                   << " (promotion)" << std::endl;
@@ -521,7 +538,12 @@ void Game::completePromotion(int promotedPiece) {
         
         checkForCheckmate();
         if (!isGameOver) {
-            checkForDrawConditions();
+            checkForDrawConditions(pendingPromotionMove);
+        }
+        if (isGameOver) {
+            printTurnTimeStats();
+        } else {
+            startTurnTimer();
         }
         
         if (g_debugOutput) {
@@ -589,8 +611,8 @@ void Game::checkForCheckmate() {
     }
 }
 
-// Checks for draw conditions: insufficient material or 75-move rule
-void Game::checkForDrawConditions() {
+// Checks for draw conditions: insufficient material, 75-move rule, or move repetition
+void Game::checkForDrawConditions(const Move& lastMove) {
     if (onlyKingsLeft()) {
         isGameOver = true;
         isDrawByMaterial = true;
@@ -602,6 +624,26 @@ void Game::checkForDrawConditions() {
         isGameOver = true;
         isDrawByMoveLimit = true;
         std::cout << "Draw by 75-move rule!" << std::endl;
+        return;
+    }
+
+    // Move repetition: same pair of moves played 3 times in a row
+    moveHistory.push_back(lastMove);
+    size_t n = moveHistory.size();
+    if (n >= 6) {
+        // Check if last 6 half-moves are 3 identical (white, black) pairs
+        const Move& w1 = moveHistory[n-6]; const Move& b1 = moveHistory[n-5];
+        const Move& w2 = moveHistory[n-4]; const Move& b2 = moveHistory[n-3];
+        const Move& w3 = moveHistory[n-2]; const Move& b3 = moveHistory[n-1];
+        auto same = [](const Move& a, const Move& b) {
+            return a.fromRow == b.fromRow && a.fromCol == b.fromCol &&
+                   a.toRow == b.toRow && a.toCol == b.toCol;
+        };
+        if (same(w1, w2) && same(w2, w3) && same(b1, b2) && same(b2, b3)) {
+            isGameOver = true;
+            isDrawByRepetition = true;
+            std::cout << "Draw by move repetition!" << std::endl;
+        }
     }
 }
 
@@ -623,6 +665,7 @@ void Game::restartGame() {
     isStalemate = false;
     isDrawByMoveLimit = false;
     isDrawByMaterial = false;
+    isDrawByRepetition = false;
     isInCheck = false;
     currentPlayer = WHITE;
     selectedRow = -1;
@@ -634,6 +677,10 @@ void Game::restartGame() {
     promotionCol = -1;
     validMoves.clear();
     halfmoveClock = 0;
+    moveHistory.clear();
+    whiteTurnTimes.clear();
+    blackTurnTimes.clear();
+    turnTimerRunning = false;
     
     // Reinitialize board
     board.initializePieces();
@@ -641,6 +688,7 @@ void Game::restartGame() {
     moveValidator.resetCastlingRights();
     
     std::cout << "Game restarted. White to move" << std::endl;
+    startTurnTimer();
 }
 
 // Returns true if it's currently a bot's turn to move
@@ -658,6 +706,9 @@ void Game::processBotMove() {
     Move move = bot->chooseMove(board.getBitboardEngine(), moveValidator, currentPlayer);
     
     if (moveValidator.executeMove(move, currentPlayer)) {
+        // Record turn time before switching players
+        stopTurnTimer();
+
         if (g_debugOutput) {
             std::cout << bot->getName() << ": "
                       << BitboardEngine::squareToAlgebraic(move.fromRow, move.fromCol) << " -> " 
@@ -686,10 +737,55 @@ void Game::processBotMove() {
 
         checkForCheckmate();
         if (!isGameOver) {
-            checkForDrawConditions();
+            checkForDrawConditions(move);
+        }
+        if (isGameOver) {
+            printTurnTimeStats();
+        } else {
+            startTurnTimer();
         }
         if (g_debugOutput) {
             board.getBitboardEngine().printBoard();
         }
     }
 }
+
+void Game::startTurnTimer() {
+    turnStartTime = std::chrono::high_resolution_clock::now();
+    turnTimerRunning = true;
+}
+
+void Game::stopTurnTimer() {
+    if (!turnTimerRunning) return;
+    auto now = std::chrono::high_resolution_clock::now();
+    double seconds = std::chrono::duration<double>(now - turnStartTime).count();
+    if (currentPlayer == WHITE) {
+        whiteTurnTimes.push_back(seconds);
+    } else {
+        blackTurnTimes.push_back(seconds);
+    }
+    turnTimerRunning = false;
+}
+
+void Game::printTurnTimeStats() const {
+    auto avg = [](const std::vector<double>& times) -> double {
+        if (times.empty()) return 0.0;
+        double sum = 0.0;
+        for (double t : times) sum += t;
+        return sum / times.size();
+    };
+
+    std::cout << "\n=== Turn Time Stats ===" << std::endl;
+
+    std::string whiteLabel = "White";
+    std::string blackLabel = "Black";
+    if (whiteBot) whiteLabel += " (" + whiteBot->getName() + ")";
+    if (blackBot) blackLabel += " (" + blackBot->getName() + ")";
+
+    std::cout << "  " << whiteLabel << ": " << whiteTurnTimes.size() << " moves, avg "
+              << std::fixed << std::setprecision(3) << avg(whiteTurnTimes) << "s per turn" << std::endl;
+    std::cout << "  " << blackLabel << ": " << blackTurnTimes.size() << " moves, avg "
+              << std::fixed << std::setprecision(3) << avg(blackTurnTimes) << "s per turn" << std::endl;
+    std::cout << std::endl;
+}
+

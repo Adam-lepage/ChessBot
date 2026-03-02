@@ -18,6 +18,8 @@ struct GameConfig {
     int playerColor = 0;      // 0 = white, 1 = black (for PVB mode)
     bool helpRequested = false; // Set when --help is used (exit code 0)
     bool modeSpecified = false; // Track if --mode was explicitly set
+    int depth = -1;            // -1 = use bot default, otherwise override MAX_DEPTH
+    int testBotGames = 0;      // 0 = normal play, >0 = run N games in test-bots mode
 
     static void printUsage(const char* programName) {
         std::cout << "Usage: " << programName << " --mode <mode> [options]\n"
@@ -33,12 +35,16 @@ struct GameConfig {
                   << "                             white / black\n"
                   << "  --no-gui                 Disable GUI (auto-enabled for bvb)\n"
                   << "  --gui                    Force GUI on (even for bvb)\n"
+                  << "  --depth <n>              Override bot search depth (default: bot's MAX_DEPTH)\n"
+                  << "  --test-bots <n>          Run n games between the two bots (bvb mode)\n"
                   << "\nExamples:\n"
                   << "  " << programName << " --mode pvp                # Human vs Human with GUI\n"
                   << "  " << programName << " --mode pvb                # Play white vs random bot\n"
                   << "  " << programName << " --mode pvb --player-color black\n"
                   << "  " << programName << " --mode bvb --debug        # Bot vs Bot, headless + debug\n"
                   << "  " << programName << " --mode bvb --gui          # Bot vs Bot with GUI\n"
+                  << "  " << programName << " --mode bvb --depth 5       # Bot vs Bot, depth 5\n"
+                  << "  " << programName << " --mode bvb --test-bots 10  # 10 games, randomized colors\n"
                   << std::endl;
     }
 
@@ -86,6 +92,28 @@ struct GameConfig {
                 else if (color == "black" || color == "b") config.playerColor = 1;
                 else {
                     std::cerr << "Error: Unknown color '" << color << "'. Use white or black.\n";
+                    return false;
+                }
+            }
+            else if (arg == "--depth") {
+                if (i + 1 >= argc) {
+                    std::cerr << "Error: --depth requires a positive integer\n";
+                    return false;
+                }
+                config.depth = std::stoi(argv[++i]);
+                if (config.depth < 1) {
+                    std::cerr << "Error: --depth must be >= 1\n";
+                    return false;
+                }
+            }
+            else if (arg == "--test-bots") {
+                if (i + 1 >= argc) {
+                    std::cerr << "Error: --test-bots requires a positive integer\n";
+                    return false;
+                }
+                config.testBotGames = std::stoi(argv[++i]);
+                if (config.testBotGames < 1) {
+                    std::cerr << "Error: --test-bots must be >= 1\n";
                     return false;
                 }
             }

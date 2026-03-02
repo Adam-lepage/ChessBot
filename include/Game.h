@@ -6,6 +6,7 @@
 #include "ChessBot.h"
 #include "GameConfig.h"
 #include <vector>
+#include <chrono>
 
 // Global debug flag - controlled by --debug command line argument
 extern bool g_debugOutput;
@@ -41,6 +42,7 @@ private:
     bool isStalemate;
     bool isDrawByMoveLimit;
     bool isDrawByMaterial;
+    bool isDrawByRepetition;
     bool isGameOver;
     
     // Drag state
@@ -59,6 +61,15 @@ private:
     ChessBot* blackBot;
 
     int halfmoveClock;  // Moves since last capture or pawn move (75-move rule)
+
+    // Move repetition tracking (same moves played 3 times in a row)
+    std::vector<Move> moveHistory;
+
+    // Turn timing
+    std::chrono::high_resolution_clock::time_point turnStartTime;
+    std::vector<double> whiteTurnTimes; // seconds per white turn
+    std::vector<double> blackTurnTimes; // seconds per black turn
+    bool turnTimerRunning;
     
     // Mode / config
     bool headless;  // true = no GUI (console only)
@@ -77,15 +88,30 @@ private:
     void handlePromotionClick(sf::Vector2f worldPos);  // Handle click during promotion UI
     void calculateValidMoves();  // Calculate valid moves for selected piece
     void checkForCheckmate();  // Check if current player is in checkmate
-    void checkForDrawConditions();  // Check for draw conditions (material/move limit)
+    void checkForDrawConditions(const Move& lastMove);  // Check for draw conditions (material/move limit/repetition)
     bool onlyKingsLeft() const;  // True when only two kings remain
     void restartGame();  // Restart the game
     bool isBotTurn() const;  // Check if current player is a bot
     void processBotMove();  // Execute bot's chosen move
     void init();  // Shared initialization
     void runHeadless();  // Run bot-vs-bot without GUI
+    void startTurnTimer();  // Start timing the current turn
+    void stopTurnTimer();   // Stop timing and record the elapsed time
+    void printTurnTimeStats() const; // Print average turn times at end of game
 
 public:
+    // Game result: 0 = white wins, 1 = black wins, 2 = draw
+    enum GameResult { WHITE_WIN = 0, BLACK_WIN = 1, DRAW = 2 };
+
     void setWhiteBot(ChessBot* bot) { whiteBot = bot; }
     void setBlackBot(ChessBot* bot) { blackBot = bot; }
+
+    // Returns the result after the game is over
+    GameResult getGameResult() const {
+        if (isCheckmate) {
+            // currentPlayer is the one who has no moves (lost)
+            return (currentPlayer == WHITE) ? BLACK_WIN : WHITE_WIN;
+        }
+        return DRAW;
+    }
 };

@@ -33,5 +33,7 @@ Options:
                              white / black
   --no-gui                 Disable GUI (auto-enabled for bvb)
   --gui                    Force GUI on (even for bvb)
+  --depth <n>              Override bot search depth (default: bot's MAX_DEPTH)
+  --test-bots <n>          Run n games between the two bots (bvb mode)
 
 
