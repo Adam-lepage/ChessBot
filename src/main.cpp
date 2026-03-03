@@ -2,10 +2,13 @@
 #include "GameConfig.h"
 #include "RandomBot.h"
 #include "Botv1.h"
-#include "Botv2.h"
+#include "botv2.h"
+#include "botv3.h"
 #include <random>
 #include <iostream>
 #include <iomanip>
+#include <atomic>
+#include <omp.h>
 
 int main(int argc, char* argv[]) {
     // Parse command-line arguments
@@ -14,15 +17,26 @@ int main(int argc, char* argv[]) {
         return config.helpRequested ? 0 : 1;
     }
 
-    // Hardcoded bots
+    // =================== Bot selection =====================
     Botv1 botv1;
     Botv2 botv2;
+    Botv3 botv3;
     RandomBot randomBot;
+
+    ChessBot* botA = &botv3;  // Bot A (used for pvb, bvb, test-bots)
+    ChessBot* botB = &botv1;  // Bot B (opponent in bvb / test-bots)
+    // ========================================================================
 
     // Apply --depth override if specified
     if (config.depth > 0) {
-        botv1.setMaxDepth(config.depth);
-        botv2.setMaxDepth(config.depth);
+        botA->setMaxDepth(config.depth);
+        botB->setMaxDepth(config.depth);
+    }
+
+    // Silence cout if --silent (for single-game mode)
+    std::streambuf* origCoutBuf = nullptr;
+    if (config.silent) {
+        origCoutBuf = std::cout.rdbuf(nullptr);
     }
 
     // ---- test-bots mode: run N headless games with randomized colors ----
@@ -30,55 +44,69 @@ int main(int argc, char* argv[]) {
         config.mode = GameMode::BVB;
         config.gui = false;
 
-        std::mt19937 rng(std::random_device{}());
+        int botAWins = 0, botBWins = 0, draws = 0;
+        std::atomic<int> completed{0};
+        int totalGames = config.testBotGames;
 
-        int bot1Wins = 0, bot2Wins = 0, draws = 0;
-        // bot1 = botv1, bot2 = botv2
+#pragma omp parallel reduction(+:botAWins, botBWins, draws)
+        {
+            // Each thread gets its own bot instances (they have mutable state)
+            Botv3 B;
+            Botv2 A;
+            RandomBot threadRandomBot;
+            ChessBot* threadBotA = &A;
+            ChessBot* threadBotB = &B;
 
-        for (int g = 1; g <= config.testBotGames; g++) {
-            // Randomize which bot plays white
-            bool bot1IsWhite = std::uniform_int_distribution<int>(0, 1)(rng) == 0;
-
-            Game game(config);
-            if (bot1IsWhite) {
-                game.setWhiteBot(&botv1);
-                game.setBlackBot(&botv2);
-            } else {
-                game.setWhiteBot(&botv2);
-                game.setBlackBot(&botv1);
+            if (config.depth > 0) {
+                threadBotA->setMaxDepth(config.depth);
+                threadBotB->setMaxDepth(config.depth);
             }
 
-            std::cout << "=== Game " << g << "/" << config.testBotGames
-                      << " | White: " << (bot1IsWhite ? botv1.getName() : botv2.getName())
-                      << "  Black: " << (bot1IsWhite ? botv2.getName() : botv1.getName())
-                      << " ===" << std::endl;
+            // Per-thread RNG seeded uniquely
+            std::mt19937 rng(std::random_device{}() + omp_get_thread_num());
 
-            game.run();
+#pragma omp for schedule(dynamic)
+            for (int g = 1; g <= totalGames; g++) {
+                bool botAIsWhite = std::uniform_int_distribution<int>(0, 1)(rng) == 0;
 
-            Game::GameResult result = game.getGameResult();
-            if (result == Game::DRAW) {
-                draws++;
-                std::cout << "Result: Draw\n" << std::endl;
-            } else if (result == Game::WHITE_WIN) {
-                if (bot1IsWhite) bot1Wins++; else bot2Wins++;
-                std::cout << "Result: White (" << (bot1IsWhite ? botv1.getName() : botv2.getName()) << ") wins\n" << std::endl;
-            } else {
-                if (!bot1IsWhite) bot1Wins++; else bot2Wins++;
-                std::cout << "Result: Black (" << (bot1IsWhite ? botv2.getName() : botv1.getName()) << ") wins\n" << std::endl;
+                Game game(config);
+                if (botAIsWhite) {
+                    game.setWhiteBot(threadBotA);
+                    game.setBlackBot(threadBotB);
+                } else {
+                    game.setWhiteBot(threadBotB);
+                    game.setBlackBot(threadBotA);
+                }
+
+                game.run();
+
+                Game::GameResult result = game.getGameResult();
+                if (result == Game::DRAW) {
+                    draws++;
+                } else if (result == Game::WHITE_WIN) {
+                    if (botAIsWhite) botAWins++; else botBWins++;
+                } else {
+                    if (!botAIsWhite) botAWins++; else botBWins++;
+                }
+
+                int done = ++completed;
+                std::cerr << "\rCompleted game " << done << "/" << totalGames << std::flush;
             }
         }
+
+        std::cerr << std::endl; // newline after progress counter
 
         // Print summary
         std::cout << "\n========================================" << std::endl;
         std::cout << "        Test-Bots Results (" << config.testBotGames << " games)" << std::endl;
         std::cout << "========================================" << std::endl;
-        std::cout << "  " << std::left << std::setw(12) << botv1.getName()
-                  << "  Wins: " << bot1Wins
-                  << "  Losses: " << bot2Wins
+        std::cout << "  " << std::left << std::setw(12) << botA->getName()
+                  << "  Wins: " << botAWins
+                  << "  Losses: " << botBWins
                   << "  Draws: " << draws << std::endl;
-        std::cout << "  " << std::left << std::setw(12) << botv2.getName()
-                  << "  Wins: " << bot2Wins
-                  << "  Losses: " << bot1Wins
+        std::cout << "  " << std::left << std::setw(12) << botB->getName()
+                  << "  Wins: " << botBWins
+                  << "  Losses: " << botAWins
                   << "  Draws: " << draws << std::endl;
         std::cout << "========================================\n" << std::endl;
 
@@ -90,22 +118,19 @@ int main(int argc, char* argv[]) {
 
     switch (config.mode) {
         case GameMode::PVP:
-            // No bots — both sides are human
             break;
 
         case GameMode::PVB:
-            // Player vs Bot: assign Botv2 to the non-player color
             if (config.playerColor == 0) {
-                game.setBlackBot(&botv2);
+                game.setBlackBot(botB);
             } else {
-                game.setWhiteBot(&botv2);
+                game.setWhiteBot(botB);
             }
             break;
 
         case GameMode::BVB:
-            // Bot vs Bot: Botv1 (white) vs Botv2 (black)
-            game.setWhiteBot(&botv1);
-            game.setBlackBot(&botv2);
+            game.setWhiteBot(botA);
+            game.setBlackBot(botB);
             break;
     }
 

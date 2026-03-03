@@ -22,7 +22,7 @@ static const char* TEXTURE_FILES[12] = {
 };
 
 // Initialize the board to the standard starting position using bitboards
-Board::Board() 
+Board::Board(bool headless) 
     : texturesLoaded(false),
       lightSquareColor(240, 217, 181),  // Light tan
       darkSquareColor(181, 136, 99),    // Brown
@@ -32,7 +32,9 @@ Board::Board()
       draggedScreenX(0),
       draggedScreenY(0),
       isDraggingPiece(false) {
-    loadTextures();
+    if (!headless) {
+        loadTextures();
+    }
     initializePieces();
 }
 
@@ -298,4 +300,27 @@ int Board::getPromotionChoice(float worldX, float worldY, int col, int playerCol
     }
     
     return -1;
+}
+
+void Board::drawPieceSprite(sf::RenderWindow& window, int pieceType, float x, float y, float scaleFactor) {
+    if (!texturesLoaded || pieceType < 0 || pieceType >= 12) return;
+    
+    // Save original scale and position
+    sf::Vector2f origScale = pieceSprites[pieceType].getScale();
+    sf::Vector2f origPos = pieceSprites[pieceType].getPosition();
+    
+    // Set small scale for captured piece display
+    float tw = static_cast<float>(pieceTextures[pieceType].getSize().x);
+    float th = static_cast<float>(pieceTextures[pieceType].getSize().y);
+    float maxDim = 128.0f * 0.8f;  // Match the original scaling base
+    float baseScale = std::min(maxDim / tw, maxDim / th);
+    float finalScale = baseScale * scaleFactor;
+    
+    pieceSprites[pieceType].setScale(finalScale, finalScale);
+    pieceSprites[pieceType].setPosition(x, y);
+    window.draw(pieceSprites[pieceType]);
+    
+    // Restore original scale and position
+    pieceSprites[pieceType].setScale(origScale);
+    pieceSprites[pieceType].setPosition(origPos);
 }

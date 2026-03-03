@@ -7,6 +7,7 @@
 #include "GameConfig.h"
 #include <vector>
 #include <chrono>
+#include <algorithm>
 
 // Global debug flag - controlled by --debug command line argument
 extern bool g_debugOutput;
@@ -65,8 +66,16 @@ private:
     // Move repetition tracking (same moves played 3 times in a row)
     std::vector<Move> moveHistory;
 
+    // Captured pieces tracking
+    std::vector<int> capturedByWhite;  // Black pieces captured by white
+    std::vector<int> capturedByBlack;  // White pieces captured by black
+    int fullMoveNumber;  // Current full move number (increments after black moves)
+
+    // Board viewport position in window pixels (for overlay drawing)
+    float boardScreenLeft, boardScreenTop, boardScreenRight, boardScreenBottom;
+
     // Turn timing
-    std::chrono::high_resolution_clock::time_point turnStartTime;
+    std::chrono::steady_clock::time_point turnStartTime;
     std::vector<double> whiteTurnTimes; // seconds per white turn
     std::vector<double> blackTurnTimes; // seconds per black turn
     bool turnTimerRunning;
@@ -98,6 +107,9 @@ private:
     void startTurnTimer();  // Start timing the current turn
     void stopTurnTimer();   // Stop timing and record the elapsed time
     void printTurnTimeStats() const; // Print average turn times at end of game
+    void recordCapture(const Move& move);  // Record a captured piece
+    void drawCapturedPieces();  // Draw captured pieces on the left side
+    void drawMoveNumber();  // Draw move number in top-right
 
 public:
     // Game result: 0 = white wins, 1 = black wins, 2 = draw

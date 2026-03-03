@@ -1,18 +1,22 @@
 #pragma once
 
 #include "ChessBot.h"
+#include "Game.h"
 #include <vector>
 #include <string>
 #include <iostream>
 #include <chrono>
 #include <climits>
 #include <algorithm>
+#include <random>
 
 class Botv1 : public ChessBot {
 public:
-    static constexpr int MAX_DEPTH = 7;
+    static constexpr int MAX_DEPTH = 6;
 
-    void setMaxDepth(int depth) { maxDepth = depth; }
+    Botv1() : rng(std::random_device{}()) {}
+
+    void setMaxDepth(int depth) override { maxDepth = depth; }
     int getMaxDepth() const { return maxDepth; }
 
     Move chooseMove(const BitboardEngine&, MoveValidator& validator, int color) override {
@@ -28,9 +32,6 @@ public:
         struct DepthStats { int positions; long long timeMs; int eval; };
         std::vector<DepthStats> stats;
 
-        // Suppress cout during search
-        std::streambuf* coutBuf = std::cout.rdbuf(nullptr);
-
         // Iterative deepening with alpha-beta pruning
         for (int depth = 1; depth <= maxDepth; depth++) {
             auto start = std::chrono::high_resolution_clock::now(); // Start timer
@@ -43,6 +44,7 @@ public:
             int beta  = INT_MAX;
             int bestEval = (color == 0) ? INT_MIN : INT_MAX;
             Move depthBest = rootMoves[0];
+            std::vector<Move> tiedMoves;  // Moves sharing the best eval
 
             // For each root move, execute it, then call alphaBeta for opponent's reply
             for (auto& rootMove : rootMoves) {
@@ -63,36 +65,52 @@ public:
 
                 // White maximizes, black minimizes
                 if (color == 0) {
-                    if (eval > bestEval) { bestEval = eval; depthBest = rootMove; }
+                    if (eval > bestEval) {
+                        bestEval = eval; depthBest = rootMove;
+                        tiedMoves.clear(); tiedMoves.push_back(rootMove);
+                    } else if (eval == bestEval) {
+                        tiedMoves.push_back(rootMove);
+                    }
                     if (eval > alpha) alpha = eval;
                 } else {
-                    if (eval < bestEval) { bestEval = eval; depthBest = rootMove; }
+                    if (eval < bestEval) {
+                        bestEval = eval; depthBest = rootMove;
+                        tiedMoves.clear(); tiedMoves.push_back(rootMove);
+                    } else if (eval == bestEval) {
+                        tiedMoves.push_back(rootMove);
+                    }
                     if (eval < beta) beta = eval;
                 }
             }
 
-            bestMove = depthBest;
+            // Randomly pick among tied best moves for variety
+            if (tiedMoves.size() > 1) {
+                std::uniform_int_distribution<size_t> dist(0, tiedMoves.size() - 1);
+                bestMove = tiedMoves[dist(rng)];
+            } else {
+                bestMove = depthBest;
+            }
 
             auto end = std::chrono::high_resolution_clock::now(); // End timer
             long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(); 
             stats.push_back({positionsEvaluated, ms, bestEval}); // Save stats for this depth
         }
 
-        // Print all depth stats
-        std::cout.rdbuf(coutBuf);
-
-        std::cout << "\n=== Botv1 Search ===" << std::endl;
-        for (int i = 0; i < (int)stats.size(); i++) {
-            std::cout << "  Depth " << (i + 1)
-                      << ": " << stats[i].positions << " positions"
-                      << ", " << stats[i].timeMs << "ms"
-                      << ", eval=" << stats[i].eval << std::endl;
+        // Print all depth stats (only when debug output is enabled)
+        if (g_debugOutput) {
+            std::cout << "\n=== Botv1 Search ===" << std::endl;
+            for (int i = 0; i < (int)stats.size(); i++) {
+                std::cout << "  Depth " << (i + 1)
+                          << ": " << stats[i].positions << " positions"
+                          << ", " << stats[i].timeMs << "ms"
+                          << ", eval=" << stats[i].eval << std::endl;
+            }
+            std::cout << "  Best: "
+                      << BitboardEngine::squareToAlgebraic(bestMove.fromRow, bestMove.fromCol)
+                      << " -> "
+                      << BitboardEngine::squareToAlgebraic(bestMove.toRow, bestMove.toCol)
+                      << "\n" << std::endl;
         }
-        std::cout << "  Best: "
-                  << BitboardEngine::squareToAlgebraic(bestMove.fromRow, bestMove.fromCol)
-                  << " -> "
-                  << BitboardEngine::squareToAlgebraic(bestMove.toRow, bestMove.toCol)
-                  << "\n" << std::endl;
 
         return bestMove;
     }
@@ -100,6 +118,7 @@ public:
     std::string getName() const override { return "Botv1"; }
 
 private:
+    mutable std::mt19937 rng;
     int maxDepth = MAX_DEPTH;
     int positionsEvaluated = 0;
 

@@ -16,4 +16,7 @@ public:
 
     // Return a display name for this bot (used in logs)
     virtual std::string getName() const = 0;
+
+    // Optional: set search depth (no-op by default for bots without depth)
+    virtual void setMaxDepth(int /*depth*/) {}
 };

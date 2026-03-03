@@ -2,12 +2,13 @@
 #include "BitboardEngine.h"
 #include <iostream>
 #include <iomanip>
+#include <cmath>
 
 bool g_debugOutput = false;
 
 Game::Game(const GameConfig& cfg)
     : window(),
-      board(),
+      board(!cfg.gui),
       moveValidator(&board.getBitboardEngine()),
       isRunning(true),
       isFullscreen(false),
@@ -30,6 +31,8 @@ Game::Game(const GameConfig& cfg)
       whiteBot(nullptr),
       blackBot(nullptr),
     halfmoveClock(0),
+    fullMoveNumber(1),
+    boardScreenLeft(0), boardScreenTop(0), boardScreenRight(0), boardScreenBottom(0),
     turnTimerRunning(false),
     headless(!cfg.gui),
       config(cfg) {
@@ -49,7 +52,9 @@ void Game::init() {
         }
     }
     
-    std::cout << "White to move" << std::endl;
+    if (g_debugOutput) {
+        std::cout << "White to move" << std::endl;
+    }
     startTurnTimer();
     if (g_debugOutput) {
         std::cout << "[DEBUG] Debug output enabled" << std::endl;
@@ -128,10 +133,6 @@ void Game::handleInput() {
             case sf::Event::MouseButtonPressed:
                 if (event.mouseButton.button == sf::Mouse::Left) {
                     sf::Vector2f worldPos = window.mapPixelToCoords(sf::Vector2i(event.mouseButton.x, event.mouseButton.y), boardView);
-                    if (g_debugOutput) {
-                        std::cout << "[DEBUG] Mouse pressed at screen (" << event.mouseButton.x << "," << event.mouseButton.y 
-                                  << ") world (" << worldPos.x << "," << worldPos.y << ")" << std::endl;
-                    }
                     if (waitingForPromotion) {
                         handlePromotionClick(worldPos);
                     } else {
@@ -142,10 +143,6 @@ void Game::handleInput() {
             case sf::Event::MouseButtonReleased:
                 if (event.mouseButton.button == sf::Mouse::Left && isDragging) {
                     sf::Vector2f worldPos = window.mapPixelToCoords(sf::Vector2i(event.mouseButton.x, event.mouseButton.y), boardView);
-                    if (g_debugOutput) {
-                        std::cout << "[DEBUG] Mouse released at screen (" << event.mouseButton.x << "," << event.mouseButton.y 
-                                  << ") world (" << worldPos.x << "," << worldPos.y << ")" << std::endl;
-                    }
                     completeDrag(worldPos);
                 }
                 break;
@@ -170,8 +167,12 @@ void Game::updateBoardView() {
     // Board size is 1024 (8 squares × 128px each)
     int boardTotalSize = 1024 + 120;  // 8*128 + 120 for labels
     
+    // Reserve left margin for captured pieces panel
+    int leftPanelWidth = std::max(120, static_cast<int>(windowWidth * 0.12f));
+    int availableWidth = static_cast<int>(windowWidth) - leftPanelWidth;
+    
     // Scale to fit window while maintaining aspect ratio
-    float scaleX = static_cast<float>(windowWidth) / boardTotalSize;
+    float scaleX = static_cast<float>(availableWidth) / boardTotalSize;
     float scaleY = static_cast<float>(windowHeight) / boardTotalSize;
     float scale = std::min(scaleX, scaleY);
     
@@ -181,9 +182,15 @@ void Game::updateBoardView() {
     int displayWidth = static_cast<int>(boardTotalSize * scale);
     int displayHeight = static_cast<int>(boardTotalSize * scale);
     
-    // Center the board
-    int offsetX = (windowWidth - displayWidth) / 2;
+    // Position board to the right of the left panel, centered vertically
+    int offsetX = leftPanelWidth + (availableWidth - displayWidth) / 2;
     int offsetY = (windowHeight - displayHeight) / 2;
+    
+    // Store board viewport position in window pixels for overlay drawing
+    boardScreenLeft = static_cast<float>(offsetX);
+    boardScreenTop = static_cast<float>(offsetY);
+    boardScreenRight = static_cast<float>(offsetX + displayWidth);
+    boardScreenBottom = static_cast<float>(offsetY + displayHeight);
     
     // Create view that shows the entire board with labels
     boardView.setSize(boardTotalSize, boardTotalSize);
@@ -234,8 +241,14 @@ void Game::render() {
         board.drawPromotionUI(window, promotionCol, currentPlayer);
     }
     
-    // Reset view
+    // Reset view for overlay drawing (captured pieces, move number, game over)
     window.setView(window.getDefaultView());
+    
+    // Draw captured pieces on the left side
+    drawCapturedPieces();
+    
+    // Draw move number in top-right
+    drawMoveNumber();
     
     // Draw game over message
     if (isGameOver) {
@@ -323,9 +336,6 @@ void Game::handleBoardClick(sf::Vector2f worldPos) {
             // Clicked the same piece again — deselect
             pieceSelected = false;
             validMoves.clear();
-            if (g_debugOutput) {
-                std::cout << "[DEBUG] Deselected piece" << std::endl;
-            }
             return;
         }
         
@@ -351,10 +361,6 @@ void Game::handleBoardClick(sf::Vector2f worldPos) {
             pieceSelected = true;
             isDragging = true;
             calculateValidMoves();
-            if (g_debugOutput) {
-                std::cout << "[DEBUG] Re-selected " << BitboardEngine::getPieceChar(piece) 
-                          << BitboardEngine::squareToAlgebraic(clickRow, clickCol) << std::endl;
-            }
             return;
         }
         
@@ -373,11 +379,6 @@ void Game::handleBoardClick(sf::Vector2f worldPos) {
         pieceSelected = true;
         
         calculateValidMoves();
-        
-        if (g_debugOutput) {
-            std::cout << "[DEBUG] Selected " << BitboardEngine::getPieceChar(piece) 
-                      << BitboardEngine::squareToAlgebraic(clickRow, clickCol) << std::endl;
-        }
     }
 }
 
@@ -438,9 +439,6 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
     if (isPromotion) {
         // Validate the move first (without executing)
         if (!moveValidator.isValidMove(selectedRow, selectedCol, targetRow, targetCol, currentPlayer)) {
-            if (g_debugOutput) {
-                std::cout << "[DEBUG] Invalid promotion move" << std::endl;
-            }
             validMoves.clear();
             pieceSelected = false;
             return;
@@ -454,10 +452,6 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
         board.clearDraggedPiece();
         validMoves.clear();
         pieceSelected = false;
-        
-        if (g_debugOutput) {
-            std::cout << "[DEBUG] Waiting for promotion choice" << std::endl;
-        }
         return;
     }
     
@@ -466,6 +460,7 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
     if (moveValidator.executeMove(move, currentPlayer)) {
         // Record turn time before switching players
         stopTurnTimer();
+        recordCapture(move);
 
         std::cout << BitboardEngine::squareToAlgebraic(selectedRow, selectedCol) << " -> " 
                   << BitboardEngine::squareToAlgebraic(targetRow, targetCol);
@@ -483,6 +478,7 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
 
         // Switch turns
         currentPlayer = (currentPlayer == WHITE) ? BLACK : WHITE;
+        if (currentPlayer == WHITE) fullMoveNumber++;  // Increment after black moves
         std::cout << ((currentPlayer == WHITE) ? "White" : "Black") << " to move" << std::endl;
 
         // Check for check/checkmate and draw conditions
@@ -496,10 +492,6 @@ void Game::executePlayerMove(int targetRow, int targetCol) {
             startTurnTimer();
         }
         
-        // Print board state in debug mode
-        if (g_debugOutput) {
-            board.getBitboardEngine().printBoard();
-        }
     } else {
         if (g_debugOutput) {
             std::cout << "[DEBUG] Invalid move" << std::endl;
@@ -525,6 +517,7 @@ void Game::completePromotion(int promotedPiece) {
     if (moveValidator.executeMove(pendingPromotionMove, currentPlayer)) {
         // Record turn time before switching players
         stopTurnTimer();
+        recordCapture(pendingPromotionMove);
 
         std::cout << BitboardEngine::squareToAlgebraic(pendingPromotionMove.fromRow, pendingPromotionMove.fromCol) << " -> "
                   << BitboardEngine::squareToAlgebraic(pendingPromotionMove.toRow, pendingPromotionMove.toCol)
@@ -534,6 +527,7 @@ void Game::completePromotion(int promotedPiece) {
         halfmoveClock = 0;
         
         currentPlayer = (currentPlayer == WHITE) ? BLACK : WHITE;
+        if (currentPlayer == WHITE) fullMoveNumber++;  // Increment after black moves
         std::cout << ((currentPlayer == WHITE) ? "White" : "Black") << " to move" << std::endl;
         
         checkForCheckmate();
@@ -544,10 +538,6 @@ void Game::completePromotion(int promotedPiece) {
             printTurnTimeStats();
         } else {
             startTurnTimer();
-        }
-        
-        if (g_debugOutput) {
-            board.getBitboardEngine().printBoard();
         }
     }
     
@@ -572,10 +562,6 @@ void Game::calculateValidMoves() {
         bool isCapture = (targetPiece != -1) || move.isEnPassant;
         validMoves.push_back({move.toRow, move.toCol, isCapture});
     }
-    
-    if (g_debugOutput) {
-        std::cout << "[DEBUG] Found " << validMoves.size() << " valid moves" << std::endl;
-    }
 }
 
 // Checks if the current player is in checkmate, stalemate, or just check, and updates game state accordingly
@@ -598,14 +584,20 @@ void Game::checkForCheckmate() {
                 winnerLabel += " (" + winnerBot->getName() + ")";
             }
 
-            std::cout << winnerLabel << " wins by checkmate!" << std::endl;
+            if (g_debugOutput) {
+                std::cout << winnerLabel << " wins by checkmate!" << std::endl;
+            }
         } else {
             isStalemate = true;
-            std::cout << "Draw by stalemate!" << std::endl;
+            if (g_debugOutput) {
+                std::cout << "Draw by stalemate!" << std::endl;
+            }
         }
     } else if (inCheck) {
         isInCheck = true;
-        std::cout << (currentPlayer == WHITE ? "White" : "Black") << " is in check!" << std::endl;
+        if (g_debugOutput) {
+            std::cout << (currentPlayer == WHITE ? "White" : "Black") << " is in check!" << std::endl;
+        }
     } else {
         isInCheck = false;
     }
@@ -616,33 +608,45 @@ void Game::checkForDrawConditions(const Move& lastMove) {
     if (onlyKingsLeft()) {
         isGameOver = true;
         isDrawByMaterial = true;
-        std::cout << "Draw by insufficient material!" << std::endl;
+        if (g_debugOutput) {
+            std::cout << "Draw by insufficient material!" << std::endl;
+        }
         return;
     }
 
     if (halfmoveClock >= 150) {  // 75 full moves = 150 half-moves
         isGameOver = true;
         isDrawByMoveLimit = true;
-        std::cout << "Draw by 75-move rule!" << std::endl;
+        if (g_debugOutput) {
+            std::cout << "Draw by 75-move rule!" << std::endl;
+        }
         return;
     }
 
-    // Move repetition: same pair of moves played 3 times in a row
+    // Move repetition: detect pieces shuffling back and forth
+    // A "cycle" is 4 half-moves: white goes A->B, black goes X->Y, white goes B->A, black goes Y->X
+    // If we see 2 full cycles (8 half-moves) with the same pattern, it's a draw
     moveHistory.push_back(lastMove);
     size_t n = moveHistory.size();
-    if (n >= 6) {
-        // Check if last 6 half-moves are 3 identical (white, black) pairs
-        const Move& w1 = moveHistory[n-6]; const Move& b1 = moveHistory[n-5];
-        const Move& w2 = moveHistory[n-4]; const Move& b2 = moveHistory[n-3];
-        const Move& w3 = moveHistory[n-2]; const Move& b3 = moveHistory[n-1];
+    if (n >= 8) {
         auto same = [](const Move& a, const Move& b) {
             return a.fromRow == b.fromRow && a.fromCol == b.fromCol &&
                    a.toRow == b.toRow && a.toCol == b.toCol;
         };
-        if (same(w1, w2) && same(w2, w3) && same(b1, b2) && same(b2, b3)) {
+        // Check if half-moves [n-8..n-5] == [n-4..n-1]  (same 4-move cycle twice)
+        bool cycleRepeats = true;
+        for (int i = 0; i < 4; i++) {
+            if (!same(moveHistory[n-8+i], moveHistory[n-4+i])) {
+                cycleRepeats = false;
+                break;
+            }
+        }
+        if (cycleRepeats) {
             isGameOver = true;
             isDrawByRepetition = true;
-            std::cout << "Draw by move repetition!" << std::endl;
+            if (g_debugOutput) {
+                std::cout << "Draw by move repetition!" << std::endl;
+            }
         }
     }
 }
@@ -681,6 +685,9 @@ void Game::restartGame() {
     whiteTurnTimes.clear();
     blackTurnTimes.clear();
     turnTimerRunning = false;
+    capturedByWhite.clear();
+    capturedByBlack.clear();
+    fullMoveNumber = 1;
     
     // Reinitialize board
     board.initializePieces();
@@ -708,6 +715,7 @@ void Game::processBotMove() {
     if (moveValidator.executeMove(move, currentPlayer)) {
         // Record turn time before switching players
         stopTurnTimer();
+        recordCapture(move);
 
         if (g_debugOutput) {
             std::cout << bot->getName() << ": "
@@ -730,6 +738,7 @@ void Game::processBotMove() {
         }
 
         currentPlayer = (currentPlayer == WHITE) ? BLACK : WHITE;
+        if (currentPlayer == WHITE) fullMoveNumber++;  // Increment after black moves
         
         if (g_debugOutput) {
             std::cout << ((currentPlayer == WHITE) ? "White" : "Black") << " to move" << std::endl;
@@ -744,21 +753,19 @@ void Game::processBotMove() {
         } else {
             startTurnTimer();
         }
-        if (g_debugOutput) {
-            board.getBitboardEngine().printBoard();
-        }
     }
 }
 
 void Game::startTurnTimer() {
-    turnStartTime = std::chrono::high_resolution_clock::now();
+    turnStartTime = std::chrono::steady_clock::now();
     turnTimerRunning = true;
 }
 
 void Game::stopTurnTimer() {
     if (!turnTimerRunning) return;
-    auto now = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::steady_clock::now();
     double seconds = std::chrono::duration<double>(now - turnStartTime).count();
+    if (seconds < 0.0) seconds = 0.0;  // Guard against clock anomalies
     if (currentPlayer == WHITE) {
         whiteTurnTimes.push_back(seconds);
     } else {
@@ -775,17 +782,120 @@ void Game::printTurnTimeStats() const {
         return sum / times.size();
     };
 
-    std::cout << "\n=== Turn Time Stats ===" << std::endl;
+    if (g_debugOutput) {
+        std::cout << "\n=== Turn Time Stats ===" << std::endl;
 
-    std::string whiteLabel = "White";
-    std::string blackLabel = "Black";
-    if (whiteBot) whiteLabel += " (" + whiteBot->getName() + ")";
-    if (blackBot) blackLabel += " (" + blackBot->getName() + ")";
+        std::string whiteLabel = "White";
+        std::string blackLabel = "Black";
+        if (whiteBot) whiteLabel += " (" + whiteBot->getName() + ")";
+        if (blackBot) blackLabel += " (" + blackBot->getName() + ")";
 
-    std::cout << "  " << whiteLabel << ": " << whiteTurnTimes.size() << " moves, avg "
-              << std::fixed << std::setprecision(3) << avg(whiteTurnTimes) << "s per turn" << std::endl;
-    std::cout << "  " << blackLabel << ": " << blackTurnTimes.size() << " moves, avg "
-              << std::fixed << std::setprecision(3) << avg(blackTurnTimes) << "s per turn" << std::endl;
-    std::cout << std::endl;
+        std::cout << "  " << whiteLabel << ": " << whiteTurnTimes.size() << " moves, avg "
+                  << std::fixed << std::setprecision(3) << avg(whiteTurnTimes) << "s per turn" << std::endl;
+        std::cout << "  " << blackLabel << ": " << blackTurnTimes.size() << " moves, avg "
+                  << std::fixed << std::setprecision(3) << avg(blackTurnTimes) << "s per turn" << std::endl;
+        std::cout << std::endl;
+    }
+}
+
+void Game::recordCapture(const Move& move) {
+    if (move.capturedPiece == -1) return;
+    // Determine which side made the capture based on currentPlayer
+    // (currentPlayer hasn't switched yet when this is called)
+    if (currentPlayer == WHITE) {
+        capturedByWhite.push_back(move.capturedPiece);  // White captured a black piece
+    } else {
+        capturedByBlack.push_back(move.capturedPiece);  // Black captured a white piece
+    }
+}
+
+void Game::drawCapturedPieces() {
+    if (headless) return;
+    
+    // Piece value order for sorting (higher value first): Queen, Rook, Bishop, Knight, Pawn
+    auto pieceValue = [](int pieceType) -> int {
+        switch (pieceType / 2) {
+            case 4: return 5;  // Queen
+            case 1: return 4;  // Rook
+            case 3: return 3;  // Bishop
+            case 2: return 2;  // Knight
+            case 0: return 1;  // Pawn
+            default: return 0;
+        }
+    };
+    
+    float panelRight = boardScreenLeft - 10.0f;  // Right edge of the panel (10px gap from board)
+    if (panelRight < 50.0f) return;  // Not enough space
+    
+    float pieceSize = 70.0f;//std::min(35.0f, (panelRight - 10.0f) / 5.0f);  // Size per piece icon
+    float piecesPerRow = std::max(1.0f, std::floor((panelRight - 10.0f) / pieceSize));
+    float startX = 10.0f;  // Left margin
+    
+    // Draw captured BLACK pieces at the TOP (black's side)
+    {
+        std::vector<int> sorted = capturedByBlack;  // Black pieces that white captured
+        std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+            return pieceValue(a) > pieceValue(b);
+        });
+        
+        float y = boardScreenTop + 10.0f;
+        float x = startX;
+        int col = 0;
+        for (int piece : sorted) {
+            board.drawPieceSprite(window, piece, x + pieceSize / 2.0f, y + pieceSize / 2.0f, pieceSize / 128.0f);
+            col++;
+            if (col >= static_cast<int>(piecesPerRow)) {
+                col = 0;
+                x = startX;
+                y += pieceSize;
+            } else {
+                x += pieceSize;
+            }
+        }
+    }
+    
+    // Draw captured WHITE pieces at the BOTTOM (white's side)
+    {
+        std::vector<int> sorted = capturedByWhite;  // White pieces that black captured
+        std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+            return pieceValue(a) > pieceValue(b);
+        });
+        
+        // Calculate total rows needed to position from bottom up
+        int totalPieces = static_cast<int>(sorted.size());
+        int rows = (totalPieces > 0) ? static_cast<int>(std::ceil(static_cast<float>(totalPieces) / piecesPerRow)) : 0;
+        float startY = boardScreenBottom - 10.0f - rows * pieceSize;
+        
+        float y = startY;
+        float x = startX;
+        int col = 0;
+        for (int piece : sorted) {
+            board.drawPieceSprite(window, piece, x + pieceSize / 2.0f, y + pieceSize / 2.0f, pieceSize / 128.0f);
+            col++;
+            if (col >= static_cast<int>(piecesPerRow)) {
+                col = 0;
+                x = startX;
+                y += pieceSize;
+            } else {
+                x += pieceSize;
+            }
+        }
+    }
+}
+
+void Game::drawMoveNumber() {
+    if (headless) return;
+    
+    // Calculate the current move display: "Move X" where X is the full move number
+    // During white's turn, it's move N. During black's turn, it's still move N.
+    std::string moveText = "Move " + std::to_string(fullMoveNumber);
+    
+    sf::Text text(moveText, font, 22);
+    text.setFillColor(sf::Color::White);
+    
+    sf::FloatRect bounds = text.getLocalBounds();
+    // Position in the top-right of the window
+    text.setPosition(window.getSize().x - bounds.width - 20.0f, 15.0f);
+    window.draw(text);
 }
 

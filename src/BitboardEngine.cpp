@@ -234,7 +234,7 @@ void BitboardEngine::movePiece(int fromRow, int fromCol, int toRow, int toCol) {
         if (g_debugOutput) {
             std::string fromSquare = squareToAlgebraic(fromRow, fromCol);
             std::string toSquare = squareToAlgebraic(toRow, toCol);
-            std::cout << "[DEBUG] " << getPieceChar(piece) << fromSquare << "-" << toSquare << std::endl;
+            //std::cout << "[DEBUG] " << getPieceChar(piece) << fromSquare << "-" << toSquare << std::endl;
         }
     }
 }

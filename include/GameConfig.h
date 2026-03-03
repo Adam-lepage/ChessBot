@@ -20,6 +20,7 @@ struct GameConfig {
     bool modeSpecified = false; // Track if --mode was explicitly set
     int depth = -1;            // -1 = use bot default, otherwise override MAX_DEPTH
     int testBotGames = 0;      // 0 = normal play, >0 = run N games in test-bots mode
+    bool silent = false;       // Suppress all cout output
 
     static void printUsage(const char* programName) {
         std::cout << "Usage: " << programName << " --mode <mode> [options]\n"
@@ -37,6 +38,7 @@ struct GameConfig {
                   << "  --gui                    Force GUI on (even for bvb)\n"
                   << "  --depth <n>              Override bot search depth (default: bot's MAX_DEPTH)\n"
                   << "  --test-bots <n>          Run n games between the two bots (bvb mode)\n"
+                  << "  --silent                 Suppress all game output (auto-enabled for test-bots)\n"
                   << "\nExamples:\n"
                   << "  " << programName << " --mode pvp                # Human vs Human with GUI\n"
                   << "  " << programName << " --mode pvb                # Play white vs random bot\n"
@@ -105,6 +107,9 @@ struct GameConfig {
                     std::cerr << "Error: --depth must be >= 1\n";
                     return false;
                 }
+            }
+            else if (arg == "--silent") {
+                config.silent = true;
             }
             else if (arg == "--test-bots") {
                 if (i + 1 >= argc) {

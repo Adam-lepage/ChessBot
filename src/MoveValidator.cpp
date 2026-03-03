@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cmath>
 #include <cstdint>
+#include "Game.h"
 
 MoveValidator::MoveValidator(BitboardEngine* engine) 
     : engine(engine), lastEnPassantRow(-1), lastEnPassantCol(-1),
@@ -331,9 +332,9 @@ bool MoveValidator::isKingInCheck(int playerColor) {
 }
 
 bool MoveValidator::executeMove(Move& move, int playerColor) {
-    if (!isValidMove(move.fromRow, move.fromCol, move.toRow, move.toCol, playerColor)) {
-        return false;
-    }
+    // if (!isValidMove(move.fromRow, move.fromCol, move.toRow, move.toCol, playerColor)) {
+    //     return false;
+    // }
     
     int piece = getPieceAt(move.fromRow, move.fromCol);
     int targetPiece = getPieceAt(move.toRow, move.toCol);
@@ -354,10 +355,6 @@ bool MoveValidator::executeMove(Move& move, int playerColor) {
         updateCastlingRights(piece, move.fromRow, move.fromCol);
         clearEnPassantSquare();
         
-        int enemyColor = (playerColor == WHITE) ? BLACK : WHITE;
-        if (isKingInCheck(enemyColor)) {
-            std::cout << "Check!" << std::endl;
-        }
         return true;
     }
     
@@ -398,13 +395,7 @@ bool MoveValidator::executeMove(Move& move, int playerColor) {
     } else {
         clearEnPassantSquare();
     }
-    
-    // Log check status
-    int enemyColor = (playerColor == WHITE) ? BLACK : WHITE;
-    if (isKingInCheck(enemyColor)) {
-        std::cout << "Check!" << std::endl;
-    }
-    
+        
     return true;
 }
 

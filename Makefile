@@ -1,9 +1,9 @@
 # Makefile for Chess Game with SFML
 
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -fopenmp
 CPPFLAGS = -Iinclude
-LDFLAGS = -lsfml-graphics -lsfml-window -lsfml-system
+LDFLAGS = -lsfml-graphics -lsfml-window -lsfml-system -fopenmp
 
 # Source and object files
 SRC_DIR = src

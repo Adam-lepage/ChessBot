@@ -7,7 +7,7 @@
 
 class Board {
 public:
-    Board();
+    Board(bool headless = false);
     ~Board();
     
     void draw(sf::RenderWindow& window, const sf::Font* font = nullptr);
@@ -28,6 +28,9 @@ public:
     // Promotion UI
     void drawPromotionUI(sf::RenderWindow& window, int col, int playerColor);
     int getPromotionChoice(float worldX, float worldY, int col, int playerColor) const;
+
+    // Draw a single piece sprite at arbitrary position/scale (for captured pieces display)
+    void drawPieceSprite(sf::RenderWindow& window, int pieceType, float x, float y, float scaleFactor);
 
     static const int BOARD_SIZE = 8;
     static const int SQUARE_SIZE = 128;

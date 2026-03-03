@@ -11,11 +11,12 @@
 #include <algorithm>
 #include <random>
 
-class Botv2 : public ChessBot {
+class Botv3 : public ChessBot {
 public:
     static constexpr int MAX_DEPTH = 5;
+    static constexpr int MAX_QDEPTH = 6;  // Depth limit for quiescence search
 
-    Botv2() : rng(std::random_device{}()) {}
+    Botv3() : rng(std::random_device{}()) {}
 
     void setMaxDepth(int depth) override { maxDepth = depth; }
     int getMaxDepth() const { return maxDepth; }
@@ -41,47 +42,34 @@ public:
             // Order root moves: previous best first, then by MVV-LVA score
             orderMoves(rootMoves, *eng, bestMove);
 
-            int alpha = INT_MIN;
+            int alpha = -INT_MAX;
             int beta  = INT_MAX;
-            int bestEval = (color == 0) ? INT_MIN : INT_MAX;
+            int bestEval = -INT_MAX;
             Move depthBest = rootMoves[0];
-            std::vector<Move> tiedMoves;  // Moves sharing the best eval
+            std::vector<Move> tiedMoves;
 
-            // For each root move, execute it, then call alphaBeta for opponent's reply
             for (auto& rootMove : rootMoves) {
-                // Save full state before making the move
                 EngineState engState = saveEngineState(*eng);
                 MoveValidator::ValidatorState valState = validator.getState();
 
-                // Execute move
                 Move m = rootMove;
                 validator.executeMove(m, color);
 
-                // Recurse into opponent's reply with alpha-beta window
-                int eval = alphaBeta(validator, *eng, depth - 1, 1 - color, alpha, beta);
+                // Negamax: negate the child's score (opponent's best = our worst)
+                int eval = -negamax(validator, *eng, depth - 1, 1 - color, -beta, -alpha);
 
-                // Restore state
                 restoreEngineState(*eng, engState);
                 validator.setState(valState);
 
-                // White maximizes, black minimizes
-                if (color == 0) {
-                    if (eval > bestEval) {
-                        bestEval = eval; depthBest = rootMove;
-                        tiedMoves.clear(); tiedMoves.push_back(rootMove);
-                    } else if (eval == bestEval) {
-                        tiedMoves.push_back(rootMove);
-                    }
-                    if (eval > alpha) alpha = eval;
-                } else {
-                    if (eval < bestEval) {
-                        bestEval = eval; depthBest = rootMove;
-                        tiedMoves.clear(); tiedMoves.push_back(rootMove);
-                    } else if (eval == bestEval) {
-                        tiedMoves.push_back(rootMove);
-                    }
-                    if (eval < beta) beta = eval;
+                if (eval > bestEval) {
+                    bestEval = eval; depthBest = rootMove;
+                    tiedMoves.clear(); tiedMoves.push_back(rootMove);
+                } else if (eval == bestEval) {
+                    tiedMoves.push_back(rootMove);
                 }
+
+                // Widening alpha as we find better root scores
+                if (eval > alpha) alpha = eval;
             }
 
             // Randomly pick among tied best moves for variety
@@ -99,7 +87,7 @@ public:
 
         // Print all depth stats (only when debug output is enabled)
         if (g_debugOutput) {
-            std::cout << "\n=== Botv2 Search ===" << std::endl;
+            std::cout << "\n=== Botv3 Search ===" << std::endl;
             for (int i = 0; i < (int)stats.size(); i++) {
                 std::cout << "  Depth " << (i + 1)
                           << ": " << stats[i].positions << " positions"
@@ -116,77 +104,91 @@ public:
         return bestMove;
     }
 
-    std::string getName() const override { return "Botv2"; }
+    std::string getName() const override { return "Botv3"; }
 
 private:
     mutable std::mt19937 rng;
     int maxDepth = MAX_DEPTH;
     int positionsEvaluated = 0;
 
-    int alphaBeta(MoveValidator& validator, BitboardEngine& eng, int depth, int currentColor, int alpha, int beta) {
-        // At horizon, drop into quiescence search to resolve captures
+    int negamax(MoveValidator& validator, BitboardEngine& eng, int depth, int currentColor, int alpha, int beta) {
         if (depth == 0) {
-            positionsEvaluated++;
-            return evaluate(eng);
+            // Drop into quiescence search to resolve captures before evaluating
+            return quiescence(validator, eng, currentColor, alpha, beta);
         }
 
-        // Generate all legal moves for the side to move and order them
         std::vector<Move> moves = generateAllMoves(eng, validator, currentColor);
 
-        // no legal moves 
         if (moves.empty()) {
             if (validator.isKingInCheck(currentColor)) {
-                // Checkmate
-                return (currentColor == 0) ? (-100000 - depth) : (100000 + depth);
+                return -100000 - depth;  // Mated: very bad for current player
             }
-            return 0; // Stalemate
+            return 0;  // Stalemate
         }
 
-        // Order moves for better pruning (captures first via MVV-LVA)
-        Move noMove(0,0,0,0);
+        Move noMove(0, 0, 0, 0);
         orderMoves(moves, eng, noMove);
 
-        if (currentColor == 0) {
-            // maximize
-            int maxEval = INT_MIN;
-            for (auto& move : moves) {
-                EngineState engState = saveEngineState(eng);
-                MoveValidator::ValidatorState valState = validator.getState();
-
-                Move m = move;
-                validator.executeMove(m, currentColor);
-
-                int eval = alphaBeta(validator, eng, depth - 1, 1, alpha, beta);
-
-                restoreEngineState(eng, engState);
-                validator.setState(valState);
-
-                if (eval > maxEval) maxEval = eval;
-                if (eval > alpha) alpha = eval;
-                if (alpha >= beta) break;  // Beta cutoff
-            }
-            return maxEval;
-        } else {
-            // minimize
-            int minEval = INT_MAX;
-            for (auto& move : moves) {
-                EngineState engState = saveEngineState(eng);
-                MoveValidator::ValidatorState valState = validator.getState();
-
-                Move m = move;
-                validator.executeMove(m, currentColor);
-
-                int eval = alphaBeta(validator, eng, depth - 1, 0, alpha, beta);
-
-                restoreEngineState(eng, engState);
-                validator.setState(valState);
-
-                if (eval < minEval) minEval = eval;
-                if (eval < beta) beta = eval;
-                if (alpha >= beta) break;  // Alpha cutoff
-            }
-            return minEval;
+        int best = -INT_MAX;
+        for (auto& move : moves) {
+            EngineState engState = saveEngineState(eng);
+            MoveValidator::ValidatorState valState = validator.getState();
+            Move m = move;
+            int eval = -negamax(validator, eng, depth - 1, 1 - currentColor, -beta, -alpha);
+            restoreEngineState(eng, engState);
+            validator.setState(valState);
+            if (eval > best)  best = eval;
+            if (eval > alpha) alpha = eval;
+            if (alpha >= beta) break;  // Beta cutoff
         }
+        return best;
+    }
+
+    // Quiescence search to resolve captures and checks before evaluating a position at leaf nodes
+    int quiescence(MoveValidator& validator, BitboardEngine& eng, int currentColor, int alpha, int beta, int qDepth = 0) {
+        positionsEvaluated++;
+
+        if (qDepth >= MAX_QDEPTH) {
+            int score = evaluate(eng);
+            return (currentColor == 0) ? score : -score;
+        }
+
+        // Always do stand-pat — even in check this gives a lower bound
+        int standPat = evaluate(eng);
+        standPat = (currentColor == 0) ? standPat : -standPat;
+
+        int best = standPat;
+        if (best >= beta)  return best;
+        if (best > alpha)  alpha = best;
+
+        // Only ever search captures/promotions — never quiet moves, even in check
+        std::vector<Move> moves = generateCaptureMoves(eng, validator, currentColor);
+        if (moves.empty()) return best;
+
+        Move noMove(0, 0, 0, 0);
+        orderMoves(moves, eng, noMove);
+
+        for (auto& move : moves) {
+            EngineState engState = saveEngineState(eng);
+            MoveValidator::ValidatorState valState = validator.getState();
+            Move m = move;
+            if (!validator.executeMove(m, currentColor)) {
+                restoreEngineState(eng, engState);
+                validator.setState(valState);
+                continue;
+            }
+
+            int eval = -quiescence(validator, eng, 1 - currentColor, -beta, -alpha, qDepth + 1);
+
+            restoreEngineState(eng, engState);
+            validator.setState(valState);
+
+            if (eval > best)  best = eval;
+            if (best >= beta) return best;
+            if (best > alpha) alpha = best;
+        }
+
+        return best;
     }
 
     // Returns a score for move ordering. Higher = search first
@@ -236,8 +238,6 @@ private:
         });
     }
 
-    // PeSTO-based evaluation with tapered eval, pawn structure, bishop pair
-    // Returns score from white's perspective in centipawns
     static int evaluate(const BitboardEngine& eng) {
         return Eval::evaluate(eng);
     }
@@ -278,6 +278,42 @@ private:
             }
         }
         return allMoves;
+    }
+
+    // Generate only capture moves and promotions for quiescence search
+    std::vector<Move> generateCaptureMoves(const BitboardEngine& eng, MoveValidator& validator, int color) {
+        std::vector<Move> captureMoves;
+        int promoRank = (color == 0) ? 0 : 7;
+
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                int piece = eng.getPieceAt(row, col);
+                if (piece == -1) continue;
+                int pieceColor = (piece % 2 == 0) ? 0 : 1;
+                if (pieceColor != color) continue;
+
+                bool isPawn = (piece / 2 == 0);
+                auto moves = validator.getValidMoves(row, col, color);
+
+                for (auto& m : moves) {
+                    bool isCapture = (eng.getPieceAt(m.toRow, m.toCol) != -1);
+                    // En passant: pawn moves diagonally to an empty square
+                    bool isEnPassant = isPawn && (m.toCol != m.fromCol) && !isCapture;
+                    bool isPromotion = isPawn && m.toRow == promoRank;
+
+                    if (isCapture || isEnPassant || isPromotion) {
+                        if (isPromotion) {
+                            Move pm = m;
+                            pm.promotedTo = (color == 0) ? BitboardEngine::WHITE_QUEEN : BitboardEngine::BLACK_QUEEN;
+                            captureMoves.push_back(pm);
+                        } else {
+                            captureMoves.push_back(m);
+                        }
+                    }
+                }
+            }
+        }
+        return captureMoves;
     }
 
     // holds all bitboards
