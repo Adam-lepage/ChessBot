@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     RandomBot randomBot;
 
     ChessBot* botA = &botv3;  // Bot A (used for pvb, bvb, test-bots)
-    ChessBot* botB = &botv1;  // Bot B (opponent in bvb / test-bots)
+    ChessBot* botB = &botv2;  // Bot B (opponent in bvb / test-bots)
     // ========================================================================
 
     // Apply --depth override if specified
@@ -51,8 +51,8 @@ int main(int argc, char* argv[]) {
 #pragma omp parallel reduction(+:botAWins, botBWins, draws)
         {
             // Each thread gets its own bot instances (they have mutable state)
-            Botv3 B;
-            Botv2 A;
+            Botv3 A;
+            Botv2 B;
             RandomBot threadRandomBot;
             ChessBot* threadBotA = &A;
             ChessBot* threadBotB = &B;
@@ -68,6 +68,7 @@ int main(int argc, char* argv[]) {
 #pragma omp for schedule(dynamic)
             for (int g = 1; g <= totalGames; g++) {
                 bool botAIsWhite = std::uniform_int_distribution<int>(0, 1)(rng) == 0;
+                // bool botAIsWhite = false;
 
                 Game game(config);
                 if (botAIsWhite) {
@@ -122,9 +123,9 @@ int main(int argc, char* argv[]) {
 
         case GameMode::PVB:
             if (config.playerColor == 0) {
-                game.setBlackBot(botB);
+                game.setBlackBot(botA);
             } else {
-                game.setWhiteBot(botB);
+                game.setWhiteBot(botA);
             }
             break;
 

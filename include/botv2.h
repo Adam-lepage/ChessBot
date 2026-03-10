@@ -55,7 +55,7 @@ public:
 
                 // Execute move
                 Move m = rootMove;
-                validator.executeMove(m, color);
+                validator.executeMove(m, color, true);
 
                 // Recurse into opponent's reply with alpha-beta window
                 int eval = alphaBeta(validator, *eng, depth - 1, 1 - color, alpha, beta);
@@ -154,7 +154,7 @@ private:
                 MoveValidator::ValidatorState valState = validator.getState();
 
                 Move m = move;
-                validator.executeMove(m, currentColor);
+                validator.executeMove(m, currentColor, true);
 
                 int eval = alphaBeta(validator, eng, depth - 1, 1, alpha, beta);
 
@@ -174,7 +174,7 @@ private:
                 MoveValidator::ValidatorState valState = validator.getState();
 
                 Move m = move;
-                validator.executeMove(m, currentColor);
+                validator.executeMove(m, currentColor, true);
 
                 int eval = alphaBeta(validator, eng, depth - 1, 0, alpha, beta);
 

@@ -11,6 +11,7 @@ OBJ_DIR = build/obj
 
 SOURCES = $(wildcard $(SRC_DIR)/*.cpp)
 OBJECTS = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SOURCES))
+DEPFILES = $(OBJECTS:.o=.d)
 EXECUTABLE = ChessGame
 
 .PHONY: all clean run rebuild
@@ -25,7 +26,7 @@ $(EXECUTABLE): $(OBJECTS)
 	@echo "Build complete: $(EXECUTABLE)"
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
 
 run: $(EXECUTABLE)
 	./$(EXECUTABLE)
@@ -35,3 +36,5 @@ clean:
 	@echo "Clean complete"
 
 rebuild: clean all
+
+-include $(DEPFILES)

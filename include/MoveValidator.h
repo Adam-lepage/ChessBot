@@ -32,7 +32,8 @@ public:
     
     // Execute a move (updates bitboard and handles captures/en passant)
     // Populates move flags (isEnPassant, isPawnPromotion, capturedPiece)
-    bool executeMove(Move& move, int playerColor);
+    // If isValidated is true, we bypass the heavy isValidMove() check (useful for bot generated moves)
+    bool executeMove(Move& move, int playerColor, bool skipValidation = false);
     
     // Check if a king is in check
     bool isKingInCheck(int playerColor);

@@ -178,7 +178,8 @@ static constexpr int MOBILITY_EG = 2;
 static constexpr int BISHOP_PAIR_MG = 30;
 static constexpr int BISHOP_PAIR_EG = 50;
 
-// Maps (row, col) to piece-square table index for white and black perspective
+// Board uses row 0 = rank 8.  PSTs are laid out visually (0 = a8, 63 = h1),
+// so board (row, col) maps directly for white; black needs a vertical flip.
 inline int whitePstIndex(int row, int col) { return row * 8 + col; }
 inline int blackPstIndex(int row, int col) { return (7 - row) * 8 + col; }
 

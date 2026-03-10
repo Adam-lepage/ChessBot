@@ -331,13 +331,35 @@ bool MoveValidator::isKingInCheck(int playerColor) {
     return isSquareAttacked(kingRow, kingCol, enemyColor);
 }
 
-bool MoveValidator::executeMove(Move& move, int playerColor) {
-    // if (!isValidMove(move.fromRow, move.fromCol, move.toRow, move.toCol, playerColor)) {
-    //     return false;
-    // }
-    
+bool MoveValidator::executeMove(Move& move, int playerColor, bool skipValidation) {
+    if (!skipValidation && !isValidMove(move.fromRow, move.fromCol, move.toRow, move.toCol, playerColor)) {
+        return false;
+    }
+
     int piece = getPieceAt(move.fromRow, move.fromCol);
+    if (piece == -1) {
+        return false;
+    }
+
+    int pieceColor = (piece % 2 == 0) ? WHITE : BLACK;
+    if (pieceColor != playerColor) {
+        return false;
+    }
+
     int targetPiece = getPieceAt(move.toRow, move.toCol);
+    if (targetPiece != -1) {
+        int targetColor = (targetPiece % 2 == 0) ? WHITE : BLACK;
+        if (targetColor == playerColor) {
+            return false;
+        }
+    }
+
+    if (piece / 2 == 0 && std::abs(move.toCol - move.fromCol) == 1 && targetPiece == -1) {
+        if (!(lastEnPassantRow == move.toRow && lastEnPassantCol == move.toCol)) {
+            return false;
+        }
+    }
+
     move.capturedPiece = targetPiece;
     
     // Check for castling
